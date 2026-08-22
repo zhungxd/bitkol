@@ -13,5 +13,10 @@ venv/
 *.token
 credentials*
 
-# 采集临时文件
-data/views/tmp/
+# 采集数据产物（含 KOL 推文内容，不入库）
+data/views/
+data/briefings/
+data/kol_avatars.json
+
+# Trae 工作区文档
+.trae/

@@ -9,12 +9,16 @@
 bitkol/
 ├─ data/
 │  ├─ x_kol_list.jsonl              # KOL 名单（字段: handle/name/followers/category/type/track/source/...）
+│  ├─ kol_avatars.json              # KOL 头像 URL 表（fetch_avatars.py 生成）
 │  ├─ views/<handle>.jsonl          # 采集结果，按 handle 落盘，追加去重
 │  └─ briefings/
 │     ├─ _input/<date>_<partition>.json   # prep_briefing_input.py 输出，Agent 消费
 │     └─ <date>_<partition>.md            # Agent 生成的最终简报
+├─ viewer/
+│  └─ index.html                    # KOL 发言浏览器（本地前端，浏览原始发言）
 ├─ scripts/
 │  ├─ collect_tweets.py             # 采集编排器（薄层，委托 sources 包）
+│  ├─ fetch_avatars.py              # 抓取 KOL 头像 URL → data/kol_avatars.json
 │  └─ prep_briefing_input.py        # 聚合 + 权重 + 分区 → _input JSON
 └─ skills/kol_briefing/
    ├─ SKILL.md                      # 本文件
@@ -23,7 +27,8 @@ bitkol/
    ├─ weights.py                    # 权重公式 + 分区筛选
    ├─ sources/
    │  ├─ __init__.py                # TweetSource 抽象基类 + 工厂
-   │  ├─ nitter_html.py             # 默认源：Nitter HTML 抓取（多镜像 failover）
+   │  ├─ nitter_curl_cffi.py        # 默认源：Nitter HTML + curl_cffi（Firefox 指纹绕 JA3）
+   │  ├─ nitter_html.py             # 备选源：Nitter HTML（urllib，无法绕 JA3 反爬）
    │  └─ nitter_rss.py              # 备选源：Nitter RSS（多数镜像已禁用，保留兼容）
    └─ prompts/
       ├─ briefing_system.md         # Agent system prompt
@@ -57,7 +62,8 @@ python3 scripts/collect_tweets.py --partition crypto
 python3 scripts/collect_tweets.py --handle cz_binance
 ```
 
-- 采集源由 `config.toml` 的 `[source].active_source` 决定，默认 `nitter_html`。
+- 采集源由 `config.toml` 的 `[source].active_source` 决定，默认 `nitter_curl_cffi`（**必须** `pip install curl_cffi`）。
+- 沙箱/国内网络环境需设代理：`HTTPS_PROXY=http://127.0.0.1:7897 python3 scripts/collect_tweets.py ...`，或填 `config.toml` 的 `proxy_url`。
 - 失败的 handle 会在终端打印 `FAIL (...)`，不影响其他 KOL。镜像全挂时换 `active_source` 或加镜像。
 - 输出落盘到 `data/views/<handle>.jsonl`，按 tweet id 去重追加。
 
@@ -112,16 +118,43 @@ python3 scripts/prep_briefing_input.py --days 3  # 覆盖窗口
 - `config.toml` 的 `[collect]` 调采集口径（条数/窗口/限速）。
 - `[weights]` 调权重公式各系数。改完跑一次 `prep_briefing_input.py` 看终端 top 5 是否合理。
 - KOL 名单 `data/x_kol_list.jsonl` 直接编辑，每行一个 JSON。`category ∈ {crypto, us_stock, both}`。
+- **handle 迁移**：KOL 有中英文双号时优先中文号。修改名单 handle 后需同步清理：删 `data/views/<旧handle>.jsonl`、从 `data/kol_avatars.json` 删旧条目、重跑 `fetch_avatars.py` + `collect_tweets.py --handle <新handle>` + `prep_briefing_input.py`。旧 handle 记录在 `migrated_from` 字段（已迁移：`justinsuntron→sunyuchentron`、`DoveyWan→DoveyWanCN`、`JiangZhuoer→JiangZhuoer2`）。
+
+## KOL 发言浏览器（viewer/）
+
+浏览采集到的 KOL 完整原始发言（不做 AI 整理），按日/分区切换，含头像、权重、互动数据：
+
+```bash
+cd bitkol && python3 -m http.server 8765
+# 打开 http://localhost:8765/viewer/
+```
+
+- 数据源：`data/briefings/_input/*.json` + `data/kol_avatars.json`（fetch 读取，带 cache-busting）
+- 新增 KOL 后需重跑 `fetch_avatars.py` 补头像（详见 README「KOL 头像维护」）
+
+## 头像抓取
+
+```bash
+HTTPS_PROXY=http://127.0.0.1:7897 python3 scripts/fetch_avatars.py            # 增量
+HTTPS_PROXY=http://127.0.0.1:7897 python3 scripts/fetch_avatars.py --force    # 全量重抓
+HTTPS_PROXY=http://127.0.0.1:7897 python3 scripts/fetch_avatars.py --handle cz_binance  # 单个
+```
+
+依赖 `curl_cffi`；从 Nitter 个人页 HTML 反解原始 Twitter 头像 URL，输出 `data/kol_avatars.json`。
 
 ## 故障速查
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
-| 所有 handle `FAIL (empty body)` | Nitter 镜像全挂 / 沙箱网络限制 | WebFetch 验证镜像可达性 → 换 `active_source` 或加镜像到 `config.toml` |
-| 某些 handle 偶发 FAIL | 镜像限流 | 调大 `rate_limit_sec` 或重跑 |
+| 所有 handle `FAIL (empty body)` | Nitter Caddy 反爬 JA3 指纹过滤（urllib/curl 被识别） | 切换 `active_source = "nitter_curl_cffi"` 并 `pip install curl_cffi` |
+| 所有 handle `FAIL (all mirrors failed)` | 代理未设或镜像全挂 | 沙箱/国内网络需设 `HTTPS_PROXY` 环境变量或 `config.toml` 的 `proxy_url` |
+| 某些 handle 偶发 FAIL (429) | Nitter rate limit | 调大 `request_interval` 或重跑 |
 | 推文时间解析失败 | Nitter 模板变动 | 检查 `nitter_html.py` 的 `_parse_created_at` |
 | 权重 top 5 全是 CZ 这种超大 V | `log_base_followers` 被关 | 确保 `config.toml` 的 `log_base_followers = true` |
 | both 类账号没进简报 | `category` 字段写错 | 名单里 `category` 必须是 `crypto`/`us_stock`/`both` 三选一 |
+| viewer 刷新后数据没更新 | 浏览器缓存（已修复） | viewer 已带 cache-busting；旧版本可硬刷新或导航到 JSON URL 一次 |
+| viewer 头像不显示 | 代理未开或 `kol_avatars.json` 缺该 handle | 开代理（Twitter CDN）或重跑 `fetch_avatars.py` |
+| viewer 打不开 | http.server 未启动 | `cd bitkol && python3 -m http.server 8765` |
 
 ## 不在本 Skill 范围
 

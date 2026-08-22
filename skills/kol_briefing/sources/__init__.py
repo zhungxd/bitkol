@@ -50,6 +50,7 @@ def get_source(config):
     source_section = config.get("source", {})
     active = source_section.get("active_source", "nitter_html")
     nitter_cfg = source_section.get("nitter", {})
+    curl_cffi_cfg = source_section.get("nitter_curl_cffi", {})
 
     if active == "nitter_html":
         from .nitter_html import NitterHtmlSource
@@ -57,5 +58,8 @@ def get_source(config):
     elif active == "nitter_rss":
         from .nitter_rss import NitterRssSource
         return NitterRssSource(nitter_cfg)
+    elif active == "nitter_curl_cffi":
+        from .nitter_curl_cffi import NitterCurlCffiSource
+        return NitterCurlCffiSource(curl_cffi_cfg)
     # 后期新增: elif active == "fxtwitter_ext": ...
     raise ValueError(f"unknown active_source: {active}")

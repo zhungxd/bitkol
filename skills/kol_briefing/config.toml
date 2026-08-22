@@ -4,8 +4,12 @@
 
 [source]
 # ★ 可插拔数据源：一行切换，后期换方案只改这里 + 加新 source 实现
-# 可选值: "nitter_html" (默认, 已验证 nitter.net 可用) | "nitter_rss" (nitter.net 已禁用 RSS) | "fxtwitter_ext" (未实现, 占位)
-active_source = "nitter_html"
+# 可选值:
+#   "nitter_curl_cffi" (推荐, 已验证可绕 JA3 反爬; 需 pip install curl_cffi)
+#   "nitter_html"      (纯 stdlib urllib, 沙箱/反爬环境可能拿不到数据)
+#   "nitter_rss"       (nitter.net 已禁用 RSS, 仅做兼容保留)
+#   "fxtwitter_ext"    (未实现, 占位)
+active_source = "nitter_curl_cffi"
 
 [source.nitter]
 # HTML 抓取路径模板（{handle} 占位）。默认 nitter.net 实测可用（RSS 已禁用，HTML 可用）
@@ -20,6 +24,27 @@ mode = "html"
 max_pages = 2
 # 单次请求超时（秒）
 request_timeout = 10
+
+[source.nitter_curl_cffi]
+# curl_cffi 版配置：用 Firefox TLS 指纹绕过 Nitter Caddy 的 JA3 反爬
+# 镜像列表（与 nitter_html 共用，failover 时按顺序尝试）
+mirrors = [
+  "https://nitter.net",
+  "https://nitter.poast.org",
+  "https://nitter.privacydev.net",
+]
+# 翻页深度（每页 ~20 条推文）
+max_pages = 2
+# 单次请求超时（秒），网络慢可调到 30
+request_timeout = 20
+# curl_cffi 的浏览器指纹（实测 firefox133 能绕过 nitter 反爬；
+# chrome*/safari*/edge* 指纹都会被 Caddy 返回 0 字节）
+impersonate = "firefox133"
+# 代理 URL，形如 "http://127.0.0.1:7897"。空字符串表示直连
+# 沙箱环境或国内访问 Nitter 需要；本地 Mac 视网络情况可不填
+proxy_url = ""
+# 每个 KOL 抓取后的间隔（秒），缓解 nitter 429 rate limit
+request_interval = 1.0
 
 [collect]
 # 每个 KOL 最多采集多少条推文

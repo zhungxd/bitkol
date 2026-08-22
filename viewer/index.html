@@ -1,0 +1,1258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KOL 发言浏览器 · bitkol</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;700;900&family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* 编辑/杂志风暗色主题 */
+  --bg: #0a0e14;
+  --bg-elev: #11161d;
+  --bg-card: #161c24;
+  --bg-hover: #1c242d;
+  --bg-stripe: #0d1217;
+  --fg: #e6edf3;
+  --fg-soft: #c9d1d9;
+  --fg-muted: #7d8590;
+  --fg-faint: #4d5562;
+  --accent: #f0b429;           /* 琥珀色主高亮 */
+  --accent-soft: #f0b42933;
+  --accent-2: #3fb950;          /* 翠绿色看多 */
+  --accent-3: #f85149;          /* 朱砂色看空 */
+  --border: #1f2730;
+  --border-soft: #161d24;
+  --shadow: 0 1px 0 rgba(0,0,0,0.4), 0 8px 24px rgba(0,0,0,0.5);
+  --serif: 'Noto Serif SC', 'Source Han Serif SC', Georgia, serif;
+  --sans: 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  /* 微妙的背景纹理：径向渐变 + 噪点感 */
+  background-image:
+    radial-gradient(circle at 20% 0%, rgba(240, 180, 41, 0.04) 0%, transparent 40%),
+    radial-gradient(circle at 80% 100%, rgba(63, 185, 80, 0.03) 0%, transparent 50%);
+  background-attachment: fixed;
+}
+
+/* ============ 顶部 Header ============ */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(10, 14, 20, 0.92);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border-bottom: 1px solid var(--border);
+}
+
+.header-inner {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 18px 32px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.header-row-1 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.brand {
+  font-family: var(--serif);
+  font-weight: 900;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.brand .brand-mark {
+  display: inline-block;
+  width: 6px;
+  height: 22px;
+  background: var(--accent);
+  margin-right: 4px;
+  transform: translateY(3px);
+}
+.brand .brand-sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--fg-muted);
+  letter-spacing: 0.05em;
+}
+
+.header-meta {
+  display: flex;
+  gap: 18px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-muted);
+  letter-spacing: 0.03em;
+}
+.header-meta span strong {
+  color: var(--accent);
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+/* ============ 工具栏 ============ */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.control-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--fg-faint);
+  font-weight: 500;
+}
+
+/* 日期选择器（segmented） */
+.date-select, .partition-select, .sort-select {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--fg-muted) 50%),
+                    linear-gradient(135deg, var(--fg-muted) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  padding-right: 26px;
+}
+.date-select { min-width: 150px; }
+.partition-select, .sort-select { min-width: 110px; }
+
+.date-select:hover, .partition-select:hover, .sort-select:hover {
+  border-color: var(--accent);
+  background-color: var(--bg-hover);
+}
+.date-select:focus, .partition-select:focus, .sort-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.partition-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-card);
+}
+.partition-toggle button {
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 7px 14px;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition: all 0.15s ease;
+  border-right: 1px solid var(--border);
+}
+.partition-toggle button:last-child { border-right: none; }
+.partition-toggle button:hover { color: var(--fg); background: var(--bg-hover); }
+.partition-toggle button.active {
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 700;
+}
+
+.search-box {
+  flex: 1;
+  min-width: 200px;
+  position: relative;
+}
+.search-box input {
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 13px;
+  padding: 7px 12px 7px 32px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+.search-box input::placeholder { color: var(--fg-faint); }
+.search-box input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.search-box::before {
+  content: '';
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--fg-faint);
+  border-radius: 50%;
+}
+.search-box::after {
+  content: '';
+  position: absolute;
+  left: 20px;
+  top: 19px;
+  width: 6px;
+  height: 1.5px;
+  background: var(--fg-faint);
+  transform: rotate(45deg);
+}
+
+/* ============ 主区 ============ */
+.main {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 28px 32px 80px;
+}
+
+/* 状态条 */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 32px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.status-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.status-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--fg-faint);
+}
+.status-value {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--fg);
+}
+.status-value.accent { color: var(--accent); }
+.status-value.green { color: var(--accent-2); }
+.status-value.red { color: var(--accent-3); }
+.status-separator {
+  width: 1px;
+  height: 28px;
+  background: var(--border);
+}
+
+/* ============ KOL Section ============ */
+.kol-list { display: flex; flex-direction: column; gap: 14px; }
+
+.kol-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  animation: fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.kol-header {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 20px;
+  background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-card) 100%);
+  border-bottom: 1px solid var(--border-soft);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  user-select: none;
+}
+.kol-header:hover { background: var(--bg-hover); }
+.kol-header.collapsed { border-bottom: none; }
+.kol-header.collapsed .kol-toggle-icon { transform: rotate(-90deg); }
+
+.kol-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  flex-shrink: 0;
+  position: relative;
+}
+.kol-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.kol-avatar .avatar-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 22px;
+  color: var(--bg);
+}
+
+.kol-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.kol-name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.kol-name {
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 17px;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+}
+.kol-handle {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.kol-handle::before { content: '@'; }
+
+.kol-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  letter-spacing: 0.05em;
+  font-weight: 500;
+  border: 1px solid;
+}
+.tag.type-tag {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.tag.track-tag {
+  background: transparent;
+  color: var(--fg-muted);
+  border-color: var(--border);
+}
+.tag.source-tag {
+  background: transparent;
+  color: var(--fg-faint);
+  border-color: var(--border-soft);
+  border-style: dashed;
+}
+
+.kol-stats {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.kol-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+.kol-stat-label {
+  color: var(--fg-faint);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.kol-stat-value {
+  color: var(--fg-soft);
+  font-weight: 500;
+  font-size: 13px;
+}
+.kol-stat-value.weight { color: var(--accent); }
+
+.kol-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.kol-toggle-icon {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 4px solid var(--fg-muted);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 0.2s ease;
+}
+
+/* ============ 推文列表 ============ */
+.tweet-list {
+  padding: 8px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.tweet-list.collapsed { display: none; }
+
+.tweet {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border-soft);
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+.tweet:last-child { border-bottom: none; }
+
+.tweet-time {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-faint);
+  text-align: right;
+  padding-top: 2px;
+  line-height: 1.4;
+}
+.tweet-time .tweet-date { color: var(--fg-muted); display: block; }
+.tweet-time .tweet-time-precise { font-size: 10px; }
+
+.tweet-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
+.tweet-text {
+  font-family: var(--sans);
+  font-size: 14.5px;
+  line-height: 1.75;
+  color: var(--fg-soft);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+.tweet-text a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--accent);
+  transition: opacity 0.15s;
+}
+.tweet-text a:hover { opacity: 0.7; }
+.tweet-text .tweet-hashtag, .tweet-text .tweet-mention {
+  color: var(--accent);
+}
+
+.tweet-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+.metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.metric-icon {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  opacity: 0.7;
+}
+.metric.replies .metric-icon { color: var(--fg-muted); }
+.metric.retweets .metric-icon { color: var(--accent-2); }
+.metric.likes .metric-icon { color: var(--accent-3); }
+
+.tweet-link {
+  margin-left: auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-faint);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+  border-radius: 3px;
+  transition: all 0.15s ease;
+}
+.tweet-link:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* ============ 空状态 ============ */
+.empty-state {
+  text-align: center;
+  padding: 80px 20px;
+  color: var(--fg-muted);
+}
+.empty-state h3 {
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--fg);
+  margin-bottom: 8px;
+}
+.empty-state p {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-faint);
+  letter-spacing: 0.03em;
+}
+.empty-state .empty-icon {
+  font-family: var(--serif);
+  font-size: 48px;
+  color: var(--border);
+  margin-bottom: 16px;
+  font-weight: 200;
+}
+
+/* ============ Loading ============ */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 80px;
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  gap: 12px;
+}
+.loading-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.loading-dot:nth-child(2) { animation-delay: 0.2s; }
+.loading-dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
+/* ============ 统计头部 KOL Bar ============ */
+.kol-bar {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.kol-bar h2 {
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+}
+.kol-bar .kol-bar-sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-faint);
+  letter-spacing: 0.05em;
+}
+
+/* ============ 滚动条 ============ */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--fg-faint); }
+
+/* ============ 响应式 ============ */
+@media (max-width: 768px) {
+  .header-inner, .main { padding-left: 16px; padding-right: 16px; }
+  .header-row-1 { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .header-meta { font-size: 10px; gap: 12px; flex-wrap: wrap; }
+  .toolbar { gap: 8px; }
+  .search-box { min-width: 100%; order: 99; }
+  .status-bar { gap: 14px; padding: 12px; flex-wrap: wrap; }
+  .status-separator { display: none; }
+  .kol-header { grid-template-columns: 48px 1fr; padding: 12px; gap: 12px; }
+  .kol-avatar { width: 48px; height: 48px; }
+  .kol-stats { display: none; }
+  .kol-toggle { display: none; }
+  .tweet { grid-template-columns: 1fr; gap: 6px; }
+  .tweet-time { text-align: left; display: flex; gap: 8px; }
+  .tweet-list { padding: 8px 12px 16px; }
+}
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="header-inner">
+    <div class="header-row-1">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <span>KOL 发言浏览器</span>
+        <span class="brand-sub">bitkol / data viewer</span>
+      </div>
+      <div class="header-meta" id="header-meta">
+        <span>窗口<strong id="meta-window">—</strong></span>
+        <span>生成时间<strong id="meta-generated">—</strong></span>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="control-group">
+        <label class="control-label">日期</label>
+        <select class="date-select" id="date-select" disabled>
+          <option>加载中...</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label class="control-label">分区</label>
+        <div class="partition-toggle" id="partition-toggle">
+          <button data-partition="crypto" class="active">加密</button>
+          <button data-partition="us_stock">美股</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label class="control-label">排序</label>
+        <select class="sort-select" id="sort-select">
+          <option value="weight">权重 ↓</option>
+          <option value="followers">关注数 ↓</option>
+          <option value="latest">最新推文 ↓</option>
+          <option value="tweets">推文数 ↓</option>
+        </select>
+      </div>
+
+      <div class="search-box">
+        <input type="text" id="search-input" placeholder="搜索 KOL 名 / handle / 推文内容...">
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="main">
+  <div class="status-bar" id="status-bar" style="display:none;">
+    <div class="status-item">
+      <span class="status-label">入选 KOL</span>
+      <span class="status-value green" id="stat-with-tweets">—</span>
+    </div>
+    <div class="status-separator"></div>
+    <div class="status-item">
+      <span class="status-label">总 KOL</span>
+      <span class="status-value" id="stat-total">—</span>
+    </div>
+    <div class="status-separator"></div>
+    <div class="status-item">
+      <span class="status-label">推文总数</span>
+      <span class="status-value accent" id="stat-tweets">—</span>
+    </div>
+    <div class="status-separator"></div>
+    <div class="status-item">
+      <span class="status-label">采集失败</span>
+      <span class="status-value red" id="stat-failed">—</span>
+    </div>
+    <div class="status-separator"></div>
+    <div class="status-item">
+      <span class="status-label">显示中</span>
+      <span class="status-value" id="stat-visible">—</span>
+    </div>
+  </div>
+
+  <div id="content">
+    <div class="loading">
+      <span class="loading-dot"></span>
+      <span class="loading-dot"></span>
+      <span class="loading-dot"></span>
+      <span>加载本地数据...</span>
+    </div>
+  </div>
+</main>
+
+<script>
+// ============================================================
+// 全局状态
+// ============================================================
+const state = {
+  dates: [],           // 本地有数据的日期列表，如 ["2026-08-22"]
+  currentDate: null,
+  partition: 'crypto',
+  sort: 'weight',
+  search: '',
+  data: null,         // 当前加载的 _input JSON
+  avatars: {},        // handle -> { twitter, nitter }
+  collapsedKols: new Set(),  // 折叠的 KOL handle 集合
+};
+
+const INPUT_DIR = '/data/briefings/_input/';
+const AVATARS_URL = '/data/kol_avatars.json';
+
+// cache-busting：每次 fetch 加时间戳，避免浏览器缓存导致看不到新数据
+function cacheBust(url) {
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}_=${Date.now()}`;
+}
+
+// ============================================================
+// 工具函数
+// ============================================================
+
+// handle hash → 颜色（用于首字母头像背景）
+function hashHue(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return Math.abs(h) % 360;
+}
+
+// 从 name 取首字母（中文取首字，英文取前 2 个字符大写）
+function initials(name) {
+  if (!name) return '?';
+  const trimmed = name.trim();
+  // 含中文字符 → 取第一个汉字
+  if (/[\u4e00-\u9fa5]/.test(trimmed)) {
+    return trimmed[0];
+  }
+  // 英文 → 前两字母大写
+  const parts = trimmed.split(/\s+/);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+  return trimmed.slice(0, 2).toUpperCase();
+}
+
+// 生成首字母头像的 data URI
+function makeInitialsAvatar(name, handle) {
+  const hue = hashHue(handle || name);
+  const bg = `hsl(${hue}, 45%, 32%)`;
+  const fg = `hsl(${hue}, 15%, 95%)`;
+  const text = initials(name);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="112" height="112">
+    <rect width="112" height="112" fill="${bg}"/>
+    <text x="50%" y="50%" font-family="Noto Serif SC, Georgia, serif" font-size="48" font-weight="700"
+      fill="${fg}" text-anchor="middle" dominant-baseline="central">${text}</text>
+  </svg>`;
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+}
+
+// 头像 HTML（带 fallback 链）
+function avatarHTML(kol) {
+  const handle = kol.handle;
+  const av = state.avatars[handle];
+  const fallback = makeInitialsAvatar(kol.name, handle);
+  // 主：Twitter URL（用户有代理才能加载）
+  // 备：nitter URL
+  // 兜底：首字母 SVG（最后 onerror）
+  if (av && av.twitter) {
+    const nitterSrc = av.nitter || '';
+    return `<img src="${av.twitter}" alt="${escapeHTML(kol.name)}"
+      onerror="this.onerror=null; ${nitterSrc ? `this.src='${nitterSrc}'; this.dataset.fallback='1'; this.onerror=() => { this.onerror=null; this.src='${fallback}'; this.dataset.fallback='2'; };` : `this.src='${fallback}';`}">`;
+  }
+  if (av && av.nitter) {
+    return `<img src="${av.nitter}" alt="${escapeHTML(kol.name)}"
+      onerror="this.onerror=null; this.src='${fallback}';">`;
+  }
+  return `<div class="avatar-fallback" style="background: hsl(${hashHue(handle)}, 45%, 32%); color: hsl(${hashHue(handle)}, 15%, 95%);">${escapeHTML(initials(kol.name))}</div>`;
+}
+
+// 转义 HTML
+function escapeHTML(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// 推文文本渲染：转义 + 链接化 + 保留换行
+function renderTweetText(text) {
+  if (!text) return '';
+  // 先转义
+  let html = escapeHTML(text);
+  // URL → <a>
+  html = html.replace(/(https?:\/\/[^\s<>"']+)/g, (url) => {
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+  });
+  // @handle → 链接到 x.com
+  html = html.replace(/(^|\s)@([A-Za-z0-9_]+)/g, (m, pre, handle) => {
+    return `${pre}<a href="https://x.com/${handle}" target="_blank" rel="noopener" class="tweet-mention">@${handle}</a>`;
+  });
+  // #hashtag
+  html = html.replace(/(^|\s)#([A-Za-z0-9_\u4e00-\u9fa5]+)/g, (m, pre, tag) => {
+    return `${pre}<a href="https://x.com/search?q=%23${encodeURIComponent(tag)}" target="_blank" rel="noopener" class="tweet-hashtag">#${tag}</a>`;
+  });
+  // $TICKER（加密符号）
+  html = html.replace(/(^|\s)\$([A-Z][A-Z0-9]{1,15})/g, (m, pre, ticker) => {
+    return `${pre}<a href="https://x.com/search?q=%24${ticker}" target="_blank" rel="noopener" class="tweet-hashtag">$${ticker}</a>`;
+  });
+  return html;
+}
+
+// 格式化数字：1234 → 1.2K, 1234567 → 1.2M
+function formatNum(n) {
+  if (n == null) return '—';
+  n = Number(n) || 0;
+  if (n < 1000) return String(n);
+  if (n < 10000) return (n / 1000).toFixed(1) + 'K';
+  if (n < 1000000) return (n / 1000).toFixed(0) + 'K';
+  return (n / 1000000).toFixed(1) + 'M';
+}
+
+// 格式化时间
+function formatTime(iso) {
+  if (!iso) return { date: '—', time: '' };
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) {
+    // 兼容 "2026-08-22" 这种纯日期
+    if (/^\d{4}-\d{2}-\d{2}$/.test(iso.slice(0, 10))) {
+      return { date: iso.slice(0, 10), time: '' };
+    }
+    return { date: iso.slice(0, 10), time: '' };
+  }
+  // 检测时间是否为 00:00:00（解析失败的标志）
+  const hasTime = d.getHours() !== 0 || d.getMinutes() !== 0 || d.getSeconds() !== 0;
+  const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const timeStr = hasTime
+    ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+    : '';
+  return { date: dateStr, time: timeStr };
+}
+
+// ============================================================
+// 数据加载
+// ============================================================
+
+async function loadDateList() {
+  try {
+    const res = await fetch(cacheBust(INPUT_DIR));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const html = await res.text();
+    // http.server 目录列表的 href 形式：<a href="2026-08-22_crypto.json">
+    const matches = [...html.matchAll(/href="(\d{4}-\d{2}-\d{2}_(?:crypto|us_stock)\.json)"/g)];
+    const files = matches.map(m => m[1]);
+    const dates = [...new Set(files.map(f => f.slice(0, 10)))].sort().reverse();
+    state.dates = dates;
+    return dates;
+  } catch (e) {
+    console.error('加载日期列表失败:', e);
+    return [];
+  }
+}
+
+async function loadAvatars() {
+  try {
+    const res = await fetch(cacheBust(AVATARS_URL));
+    if (!res.ok) return {};
+    return await res.json();
+  } catch (e) {
+    return {};
+  }
+}
+
+async function loadPartitionData(date, partition) {
+  const url = cacheBust(`${INPUT_DIR}${date}_${partition}.json`);
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      if (res.status === 404) return null;
+      throw new Error(`HTTP ${res.status}`);
+    }
+    return await res.json();
+  } catch (e) {
+    console.error('加载数据失败:', e);
+    return null;
+  }
+}
+
+// ============================================================
+// 渲染
+// ============================================================
+
+function renderDateSelect() {
+  const sel = document.getElementById('date-select');
+  sel.disabled = false;
+  if (state.dates.length === 0) {
+    sel.innerHTML = '<option value="">无本地数据</option>';
+    return;
+  }
+  sel.innerHTML = state.dates.map(d => `<option value="${d}">${d}</option>`).join('');
+  if (!state.currentDate || !state.dates.includes(state.currentDate)) {
+    state.currentDate = state.dates[0];
+  }
+  sel.value = state.currentDate;
+}
+
+function renderPartitionToggle() {
+  const toggle = document.getElementById('partition-toggle');
+  toggle.querySelectorAll('button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.partition === state.partition);
+  });
+}
+
+function renderStatus() {
+  const d = state.data;
+  if (!d) {
+    document.getElementById('status-bar').style.display = 'none';
+    return;
+  }
+  document.getElementById('status-bar').style.display = 'flex';
+  const stats = d.stats || {};
+  document.getElementById('stat-with-tweets').textContent = stats.kol_with_tweets ?? '—';
+  document.getElementById('stat-total').textContent = stats.kol_total ?? '—';
+  document.getElementById('stat-tweets').textContent = stats.tweets_total ?? '—';
+  document.getElementById('stat-failed').textContent = (stats.excluded_empty || []).length;
+  document.getElementById('meta-window').textContent =
+    `${d.window?.days ?? '?'}天 / ${d.window?.max_per_kol ?? '?'}条`;
+  document.getElementById('meta-generated').textContent =
+    (d.generated_at || '').slice(0, 19).replace('T', ' ');
+}
+
+// 排序 KOL 列表
+function sortKols(kols) {
+  const arr = [...kols];
+  switch (state.sort) {
+    case 'followers':
+      arr.sort((a, b) => (b.followers || 0) - (a.followers || 0));
+      break;
+    case 'latest':
+      arr.sort((a, b) => {
+        const at = latestTweetTime(a), bt = latestTweetTime(b);
+        return bt - at;
+      });
+      break;
+    case 'tweets':
+      arr.sort((a, b) => (b.tweets?.length || 0) - (a.tweets?.length || 0));
+      break;
+    case 'weight':
+    default:
+      arr.sort((a, b) => (b.weight || 0) - (a.weight || 0));
+  }
+  return arr;
+}
+
+function latestTweetTime(kol) {
+  if (!kol.tweets || kol.tweets.length === 0) return 0;
+  return Math.max(...kol.tweets.map(t => new Date(t.created_at || 0).getTime() || 0));
+}
+
+// 关键词过滤
+function filterKols(kols) {
+  const q = state.search.trim().toLowerCase();
+  if (!q) return kols;
+  return kols.filter(k => {
+    if (k.name && k.name.toLowerCase().includes(q)) return true;
+    if (k.handle && k.handle.toLowerCase().includes(q)) return true;
+    if (k.tweets && k.tweets.some(t => (t.text || '').toLowerCase().includes(q))) return true;
+    return false;
+  });
+}
+
+function renderKolList() {
+  const container = document.getElementById('content');
+  const d = state.data;
+
+  if (!d) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">∅</div>
+        <h3>该日期无 ${state.partition} 分区数据</h3>
+        <p>请检查 data/briefings/_input/ 下是否存在 ${state.currentDate}_${state.partition}.json</p>
+      </div>`;
+    document.getElementById('stat-visible').textContent = '0';
+    return;
+  }
+
+  const kols = filterKols(sortKols(d.kols || []));
+  document.getElementById('stat-visible').textContent = kols.length;
+
+  if (kols.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">∅</div>
+        <h3>无匹配的 KOL</h3>
+        <p>调整搜索关键词或切换分区</p>
+      </div>`;
+    return;
+  }
+
+  // 总推文数（仅显示中的）
+  const visibleTweets = kols.reduce((s, k) => s + (k.tweets?.length || 0), 0);
+
+  let html = `
+    <div class="kol-bar">
+      <h2>${escapeHTML(d.partition_label || state.partition)}</h2>
+      <span class="kol-bar-sub">${kols.length} KOLs / ${visibleTweets} tweets · 按 ${sortLabel()} 排序</span>
+    </div>
+    <div class="kol-list">`;
+
+  kols.forEach((kol, i) => {
+    const collapsed = state.collapsedKols.has(kol.handle);
+    html += renderKolSection(kol, collapsed, i);
+  });
+
+  html += '</div>';
+  container.innerHTML = html;
+
+  // 绑定折叠点击
+  container.querySelectorAll('.kol-header').forEach(h => {
+    h.addEventListener('click', (e) => {
+      // 不点击链接本身
+      if (e.target.closest('a')) return;
+      const handle = h.dataset.handle;
+      if (state.collapsedKols.has(handle)) {
+        state.collapsedKols.delete(handle);
+      } else {
+        state.collapsedKols.add(handle);
+      }
+      renderKolList();
+    });
+  });
+}
+
+function sortLabel() {
+  return { weight: '权重', followers: '关注数', latest: '最新推文', tweets: '推文数' }[state.sort] || '权重';
+}
+
+function renderKolSection(kol, collapsed, idx) {
+  const tweets = kol.tweets || [];
+  const tweetCount = tweets.length;
+  const totalLikes = tweets.reduce((s, t) => s + ((t.public_metrics && t.public_metrics.likes) || 0), 0);
+  const followers = kol.followers || 0;
+  const weight = kol.weight || 0;
+  const lastTime = latestTweetTime(kol);
+  const lastTimeStr = lastTime > 0
+    ? new Date(lastTime).toISOString().slice(0, 16).replace('T', ' ')
+    : '—';
+
+  // 头部右侧统计
+  let statsHTML = `
+    <div class="kol-stats">
+      <div class="kol-stat">
+        <span class="kol-stat-label">关注</span>
+        <span class="kol-stat-value">${formatNum(followers)}</span>
+      </div>
+      <div class="kol-stat">
+        <span class="kol-stat-label">权重</span>
+        <span class="kol-stat-value weight">${weight.toFixed(4)}</span>
+      </div>
+      <div class="kol-stat">
+        <span class="kol-stat-label">推文</span>
+        <span class="kol-stat-value">${tweetCount}</span>
+      </div>
+      <div class="kol-stat">
+        <span class="kol-stat-label">最近</span>
+        <span class="kol-stat-value">${lastTimeStr}</span>
+      </div>
+      <div class="kol-toggle">
+        <span class="kol-toggle-icon"></span>
+        ${collapsed ? '展开' : '折叠'}
+      </div>
+    </div>`;
+
+  // 标签
+  let tagsHTML = '<div class="kol-tags">';
+  if (kol.type) tagsHTML += `<span class="tag type-tag">${escapeHTML(kol.type)}</span>`;
+  if (kol.track) tagsHTML += `<span class="tag track-tag">${escapeHTML(kol.track)}</span>`;
+  if (kol.source) tagsHTML += `<span class="tag source-tag">${escapeHTML(kol.source)}</span>`;
+  tagsHTML += '</div>';
+
+  // 头部
+  let headerHTML = `
+    <div class="kol-header ${collapsed ? 'collapsed' : ''}" data-handle="${escapeHTML(kol.handle)}"
+         style="animation-delay: ${Math.min(idx * 30, 600)}ms;">
+      <div class="kol-avatar">${avatarHTML(kol)}</div>
+      <div class="kol-meta">
+        <div class="kol-name-row">
+          <span class="kol-name">${escapeHTML(kol.name || kol.handle)}</span>
+          <span class="kol-handle">${escapeHTML(kol.handle)}</span>
+          ${kol.url ? `<a href="${escapeHTML(kol.url)}" target="_blank" rel="noopener" style="font-family:var(--mono);font-size:10px;color:var(--fg-faint);text-decoration:none;border:1px solid var(--border);padding:1px 6px;border-radius:3px;">x.com↗</a>` : ''}
+        </div>
+        ${tagsHTML}
+      </div>
+      ${statsHTML}
+    </div>`;
+
+  // 推文列表
+  let tweetsHTML = '';
+  if (!collapsed && tweetCount > 0) {
+    tweetsHTML = '<div class="tweet-list">';
+    // 按时间倒序
+    const sortedTweets = [...tweets].sort((a, b) => {
+      const at = new Date(a.created_at || 0).getTime() || 0;
+      const bt = new Date(b.created_at || 0).getTime() || 0;
+      return bt - at;
+    });
+    sortedTweets.forEach(t => {
+      tweetsHTML += renderTweet(t, kol);
+    });
+    tweetsHTML += '</div>';
+  } else if (!collapsed && tweetCount === 0) {
+    tweetsHTML = '<div class="tweet-list"><div style="padding:20px 0;color:var(--fg-faint);font-family:var(--mono);font-size:11px;text-align:center;">本期无新推文</div></div>';
+  }
+
+  return `<section class="kol-section">${headerHTML}${tweetsHTML}</section>`;
+}
+
+function renderTweet(tweet, kol) {
+  const t = formatTime(tweet.created_at);
+  const m = tweet.public_metrics || {};
+  const url = tweet.url || (kol.handle && tweet.id ? `https://x.com/${kol.handle}/status/${tweet.id}` : '');
+
+  // 简单的 SVG 图标（评论/转推/点赞）
+  const iconComment = `<svg class="metric-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h12v9H6l-3 3v-3H2V2z"/></svg>`;
+  const iconRetweet = `<svg class="metric-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M3 6V3h7l-1-1 1-1 3 3-3 3-1-1 1-1H5v3H3zm10 4v3H6l1 1-1 1-3-3 3-3 1 1-1 1h5v-3h2z"/></svg>`;
+  const iconHeart = `<svg class="metric-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 14s-5-3-5-7a3 3 0 0 1 5-2 3 3 0 0 1 5 2c0 4-5 7-5 7z"/></svg>`;
+
+  return `
+    <article class="tweet">
+      <div class="tweet-time">
+        <span class="tweet-date">${t.date}</span>
+        ${t.time ? `<span class="tweet-time-precise">${t.time}</span>` : ''}
+      </div>
+      <div class="tweet-body">
+        <div class="tweet-text">${renderTweetText(tweet.text)}</div>
+        <div class="tweet-footer">
+          <span class="metric replies">${iconComment}${formatNum(m.replies)}</span>
+          <span class="metric retweets">${iconRetweet}${formatNum(m.retweets)}</span>
+          <span class="metric likes">${iconHeart}${formatNum(m.likes)}</span>
+          ${url ? `<a class="tweet-link" href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">原文 ↗</a>` : ''}
+        </div>
+      </div>
+    </article>`;
+}
+
+// ============================================================
+// 事件
+// ============================================================
+
+function bindEvents() {
+  document.getElementById('date-select').addEventListener('change', async (e) => {
+    state.currentDate = e.target.value;
+    state.data = await loadPartitionData(state.currentDate, state.partition);
+    renderStatus();
+    renderKolList();
+  });
+
+  document.getElementById('partition-toggle').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    state.partition = btn.dataset.partition;
+    renderPartitionToggle();
+    state.data = await loadPartitionData(state.currentDate, state.partition);
+    renderStatus();
+    renderKolList();
+  });
+
+  document.getElementById('sort-select').addEventListener('change', (e) => {
+    state.sort = e.target.value;
+    renderKolList();
+  });
+
+  let searchTimer;
+  document.getElementById('search-input').addEventListener('input', (e) => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      state.search = e.target.value;
+      renderKolList();
+    }, 150);
+  });
+}
+
+// ============================================================
+// 启动
+// ============================================================
+
+async function init() {
+  // 并行加载：日期列表 + 头像表
+  const [dates, avatars] = await Promise.all([loadDateList(), loadAvatars()]);
+  state.avatars = avatars || {};
+
+  if (dates.length === 0) {
+    document.getElementById('content').innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">∅</div>
+        <h3>未找到本地数据</h3>
+        <p>请先运行 collect_tweets.py + prep_briefing_input.py 生成 data/briefings/_input/&lt;date&gt;_&lt;partition&gt;.json</p>
+      </div>`;
+    document.getElementById('date-select').disabled = true;
+    document.getElementById('date-select').innerHTML = '<option>无数据</option>';
+    return;
+  }
+
+  renderDateSelect();
+  renderPartitionToggle();
+  state.data = await loadPartitionData(state.currentDate, state.partition);
+  renderStatus();
+  renderKolList();
+  bindEvents();
+}
+
+init();
+</script>
+
+</body>
+</html>
