@@ -1,24 +1,42 @@
 # x.com 中文加密 & 美股 KOL 数据项目
 
-本项目提供一份**可脚本处理**的 x.com（Twitter）中文 KOL 名单（加密货币 + 美股方向），所有账号粉丝数均为 **fxtwitter 公开 API 实测值**（抓取日期见各文件），并附带刷新与生成脚本，供后续开发"定期收集 KOL 观点"等下游任务使用。
+本项目提供一份**可脚本处理**的 x.com（Twitter）中文 KOL 名单（加密货币 + 美股方向），所有账号粉丝数均为 **fxtwitter 公开 API 实测值**（抓取日期见各文件），并附带刷新与生成脚本；同时已落地 **KOL 简报 Skill**，可周期性采集推文 → 聚合权重 → 由 Agent 生成加密 / 美股分区简报。
 
 ## 目录结构
 
 ```
 bitkol/
-├── data/                        # ★ 所有数据收集产物
-│   ├── x_kol_list.jsonl         #   主数据：77 个 KOL，每行一个 JSON（脚本处理首选）
-│   ├── x_kol_list.md            #   人类可读版：按「加密 / 美股」分组的表格
-│   ├── raw/                     #   原始抓取/存档数据（勿手动修改）
-│   │   ├── followers_raw.json   #     第一次批量抓取的粉丝数原始数据（105 个候选 handle）
-│   │   ├── extra_raw.jsonl      #     补充验证的原始数据（9 个知名账号）
-│   │   ├── biteye_kol.html      #     数据来源：Biteye《华语加密 KOL 影响力图鉴》存档
-│   │   └── odaily_us.html       #     数据来源：Biteye《X 美股投资交易 50 位大咖》存档
-│   └── views/                   #   （预留）后续定期采集的 KOL 观点，按 <handle>.jsonl 存放
-├── scripts/                     # 采集 / 生成脚本（代码与数据分离）
-│   ├── fetch_followers.py       #   批量抓取粉丝数（fxtwitter API）→ data/raw/followers_raw.json
-│   └── build_list.py            #   元数据合并 → 生成 data/x_kol_list.{jsonl,md}
-└── README.md                    # 本文档
+├── data/                          # ★ 所有数据产物
+│   ├── x_kol_list.jsonl            #   主名单：77 个 KOL，每行一个 JSON（脚本处理首选）
+│   ├── x_kol_list.md              #   人类可读版：按「加密 / 美股」分组的表格
+│   ├── raw/                       #   原始抓取/存档数据（勿手动修改）
+│   │   ├── followers_raw.json     #     第一次批量抓取的粉丝数原始数据（105 个候选 handle）
+│   │   ├── extra_raw.jsonl        #     补充验证的原始数据（9 个知名账号）
+│   │   ├── biteye_kol.html        #     数据来源：Biteye《华语加密 KOL 影响力图鉴》存档
+│   │   └── odaily_us.html         #     数据来源：Biteye《X 美股投资交易 50 位大咖》存档
+│   ├── views/                     #   采集到的推文存档，按 <handle>.jsonl 落盘追加去重
+│   └── briefings/                 #   简报产物
+│       ├── _input/<date>_<partition>.json   # prep_briefing_input.py 输出，Agent 消费
+│       └── <date>_<partition>.md            # Agent 生成的最终简报
+├── scripts/                       # 采集 / 生成 / 聚合脚本
+│   ├── fetch_followers.py         #   批量抓取粉丝数（fxtwitter API）→ data/raw/followers_raw.json
+│   ├── build_list.py              #   元数据合并 → 生成 data/x_kol_list.{jsonl,md}
+│   ├── collect_tweets.py           #   采集编排器（薄层，委托 skills/kol_briefing/sources）
+│   └── prep_briefing_input.py      #   聚合 + 权重 + 分区 → _input JSON
+├── skills/kol_briefing/           # ★ KOL 简报 Skill
+│   ├── SKILL.md                   #   Agent 执行流程（必读：4 步操作指南）
+│   ├── config.toml                #   所有可调参数（数据源 / 采集 / 权重 / 分区）
+│   ├── config_loader.py           #   TOML 加载（3.11+ tomllib + fallback）
+│   ├── weights.py                 #   权重公式 + 分区筛选（纯函数）
+│   ├── sources/                   #   可插拔推文数据源
+│   │   ├── __init__.py             #     TweetSource 抽象基类 + 工厂
+│   │   ├── nitter_html.py           #     默认源：Nitter HTML（多镜像 failover + 双解析）
+│   │   └── nitter_rss.py            #     备选源：Nitter RSS（多数镜像已禁用，保留兼容）
+│   └── prompts/                   #   Agent prompt 与输出模板
+│       ├── briefing_system.md      #     system prompt（分析原则 / 立场判定速查）
+│       └── briefing_template.md    #     简报 7 章节输出模板
+├── .env.example                   # 环境变量示例（Nitter 镜像列表等）
+└── README.md                      # 本文档
 ```
 
 ## 数据格式：data/x_kol_list.jsonl
@@ -110,55 +128,46 @@ python3 scripts/fetch_followers.py
 - **handle 可能变更**：神鱼实际 handle 为 `@bitfish`（DiscusFish）；硅谷王川为 `@Svwang1`。
 - 榜单快照本质：`source=Biteye华语KOL榜` 的账号为 2025-09-24 影响力快照，活跃度可能变化，建议采集时校验。
 
-## 后续开发：定期采集 KOL 观点
+## KOL 简报 Skill（已落地）
 
-采集到的观点统一落盘到 **`data/views/<handle>.jsonl`**，与名单数据保持同一目录体系。
+完整的「采集 → 聚合权重 → Agent 生成简报」流水线已实现，**不调用任何 LLM API**：脚本只做数据搬运与权重计算，分析由 Agent 自身能力完成。
 
-### 方案 A：X API v2（官方，推荐，需付费/申请）
+**完整说明见 [skills/kol_briefing/SKILL.md](skills/kol_briefing/SKILL.md)，4 步执行流程：**
 
-```python
-import json, time, requests
+1. **采集**：`python3 scripts/collect_tweets.py` → 推文落盘到 `data/views/<handle>.jsonl`（按 tweet id 去重追加）
+2. **聚合**：`python3 scripts/prep_briefing_input.py` → 输出 `data/briefings/_input/<date>_<partition>.json`（含权重 / breakdown / 分区）
+3. **分析**：Agent 用 `Read` 工具打开 _input JSON，按 [prompts/briefing_system.md](skills/kol_briefing/prompts/briefing_system.md) 的原则与立场判定速查分析
+4. **输出**：按 [prompts/briefing_template.md](skills/kol_briefing/prompts/briefing_template.md) 模板生成 `data/briefings/<date>_<partition>.md`
 
-BEARER = "你的 X API Bearer Token"   # 在 developer.twitter.com 申请
+### 数据源（默认 Nitter HTML，可一行切换）
 
-def fetch_recent_tweets(handle: str, max_results: int = 10) -> list:
-    user = requests.get(
-        f"https://api.twitter.com/2/users/by/username/{handle}",
-        headers={"Authorization": f"Bearer {BEARER}"},
-    ).json()["data"]
-    r = requests.get(
-        f"https://api.twitter.com/2/users/{user['id']}/tweets",
-        headers={"Authorization": f"Bearer {BEARER}"},
-        params={"max_results": max_results, "tweet.fields": "created_at,public_metrics,entities"},
-    )
-    return r.json().get("data", [])
+- `active_source = "nitter_html"`（默认，已验证 nitter.net 可用）：多镜像 failover + HTMLParser/regex 双解析
+- `active_source = "nitter_rss"`（备选，多数镜像已禁用 RSS，保留兼容）
+- 官方 X API 因收费未采用；如需切换或新增源（如 fxtwitter_ext），见 [SKILL.md](skills/kol_briefing/SKILL.md) 的「换数据源」章节，编排脚本零改动。
 
-kols = [json.loads(line) for line in open("data/x_kol_list.jsonl", encoding="utf-8")]
-for k in kols:
-    tweets = fetch_recent_tweets(k["handle"])
-    # TODO: 落盘到 data/views/<handle>.jsonl，记录抓取时间戳
-    time.sleep(1.2)   # 注意 Basic 层级的应用级限流 ~10 req/min
-```
+### 权重设计
 
-### 方案 B：nitter 镜像（免费，无需 token，但实例不稳定）
+权重公式：`raw = log10(followers) × type_mult × source_mult × track_bonus`，**分区内归一化**（每区 weight 之和 = 1.0），各系数在 [config.toml](skills/kol_briefing/config.toml) 集中可调，每个 KOL 附 `weight_breakdown` 供审计。
 
-```python
-# 例：https://nitter.net/<handle>/rss 或 /search，HTML/XML 解析
-# 需自行维护可用镜像列表，建议多实例 failover
-```
+- **影响力**：log10 压缩粉丝数，避免 CZ 等超大 V 压倒一切
+- **专业度**：投研 / 研究 > 交易 > 投资人 / 创始人 > 赛道专家 > 媒体 > 官方
+- **权威度**：知名人物 > Biteye 榜 > 媒体 > 官方
+- **赛道匹配**：KOL `track` 与分区匹配则乘 bonus（如「半导体/科技股」在 us_stock 分区加成）
 
-### 建议的数据流水线
+### 分区逻辑
 
-```
-定时任务（cron / GitHub Actions）
-   ↓
-scripts/fetch_followers.py   → 刷新粉丝数（可选，低频，如每周）
-   ↓
-采集脚本（方案 A/B）           → 抓取每个 handle 最近推文
-   ↓
-data/views/<handle>.jsonl     → 原始推文存档（带抓取时间戳，去重 by tweet id）
-   ↓
-分析脚本                      → 观点聚类 / 情绪 / 关键词 / 报告
-```
+按 KOL 名单的 `category` 字段分 crypto / us_stock 两区，`both` 类账号同时进两份简报。
 
-采集去重建议：以推文 `id` 为主键建索引（如 SQLite 或按日分片的 JSONL），避免重复入库；每条记录至少保留 `id`、`created_at`、`text`、`public_metrics`、`fetched_at` 五要素。
+### 推文数据格式（data/views/<handle>.jsonl）
+
+每行一个 JSON，UTF-8，按 tweet `id` 去重追加：
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 推文 id（主键） |
+| `created_at` | ISO8601 时间字符串 |
+| `text` | 推文全文 |
+| `url` | 推文链接 |
+| `public_metrics` | `{replies, retweets, likes}`（如源支持） |
+| `fetched_at` | 抓取时间戳 |
+| `handle` | 所属 KOL handle |

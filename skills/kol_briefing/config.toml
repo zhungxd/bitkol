@@ -1,0 +1,90 @@
+# KOL 简报 Skill 配置
+# 所有可调参数集中此文件，避免硬编码。
+# Python 3.11+ 用标准库 tomllib 读取；3.10 及以下见 scripts 内 fallback 解析。
+
+[source]
+# ★ 可插拔数据源：一行切换，后期换方案只改这里 + 加新 source 实现
+# 可选值: "nitter_html" (默认, 已验证 nitter.net 可用) | "nitter_rss" (nitter.net 已禁用 RSS) | "fxtwitter_ext" (未实现, 占位)
+active_source = "nitter_html"
+
+[source.nitter]
+# HTML 抓取路径模板（{handle} 占位）。默认 nitter.net 实测可用（RSS 已禁用，HTML 可用）
+mirrors = [
+  "https://nitter.net",
+  "https://nitter.poast.org",
+  "https://nitter.privacydev.net",
+]
+# 抓取模式: "html" (解析 /<handle> 页面, 已验证) | "rss" (/<handle>/rss, nitter.net 已禁用)
+mode = "html"
+# 翻页：nitter HTML 底部 "Load more" 链接含 ?cursor=...，max_pages 控制抓取深度
+max_pages = 2
+# 单次请求超时（秒）
+request_timeout = 10
+
+[collect]
+# 每个 KOL 最多采集多少条推文
+max_per_kol = 20
+# 时间窗口（天），0 表示不限
+days_window = 7
+# 每次请求间隔（秒），避免被镜像限流
+rate_limit_sec = 1.5
+
+[weights]
+# 权重 = base(followers) × type_mult × source_mult × track_match_bonus，分区归一化
+# base 用 log10(followers) 避免 CZ 等超大 V 压倒一切
+log_base_followers = true
+
+[weights.type_mult]
+# 账号性质系数：投研/研究 > 交易 > 投资人/创始人 > 赛道专家 > 可视化 > 媒体 > 官方
+# 投研最高（观点产出质量高），官方最低（公告非个人观点）
+"个人-投研" = 1.30
+"个人-研究" = 1.25
+"个人-交易" = 1.20
+"个人-投资人" = 1.10
+"个人-创始人" = 1.10
+"个人-空投" = 0.95
+"个人-DeFi" = 0.95
+"个人-AI" = 0.95
+"个人-RWA" = 0.95
+"个人-可视化" = 0.80
+"个人-综合" = 1.00
+"个人-基本面" = 1.15
+"个人-大盘" = 1.10
+"个人-宏观" = 1.15
+"个人-财报" = 1.15
+"个人-期权" = 1.10
+"个人-技术" = 1.00
+"个人-AI/研究" = 1.10
+"个人-矿工/投资人" = 1.05
+"个人-空投/研究" = 1.05
+"个人-空投/交易" = 1.00
+"个人-DeFi/公链" = 1.00
+"个人-研究者" = 1.25
+"媒体" = 0.60           # 媒体偏报道非观点，降权
+"媒体/研究" = 0.80
+"官方" = 0.40           # 官方公告非个人观点，强降权
+
+[weights.source_mult]
+# 数据来源系数：知名人物 > Biteye 榜 > 媒体 > 官方
+"知名人物" = 1.20
+"Biteye华语KOL榜" = 1.00
+"Biteye美股50人榜" = 1.00
+"Biteye美股50人榜+Biteye华语榜" = 1.10
+"知名媒体" = 0.80
+"知名官方" = 0.50
+
+[weights.track_match_bonus]
+# 赛道与分区匹配的加成（如「半导体/科技股」track 在 us_stock 分区加成，不匹配则 1.0）
+enabled = true
+bonus = 1.10
+
+# 赛道关键词 → 分区映射（用于判断 track 是否匹配分区）
+[weights.track_keywords.crypto]
+keywords = ["BTC", "ETH", "DeFi", "空投", "链", "币", "crypto", "blockchain", "web3", "dao", "nft", "矿", "RWA"]
+
+[weights.track_keywords.us_stock]
+keywords = ["美股", "SP500", "纳指", "半导体", "科技股", "财报", "期权", "宏观", "ETF", "AI算力", "芯片", "纳指100", "stock"]
+
+[partition]
+# category → partition 映射规则：both 类账号同时进入两份简报
+both_goes_to = ["crypto", "us_stock"]

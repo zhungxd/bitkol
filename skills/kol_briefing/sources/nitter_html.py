@@ -1,0 +1,384 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Nitter HTML 抓取 source（默认，已验证 nitter.net 可用）。
+
+实测：https://nitter.net/<handle> 返回真实推文 HTML（含正文、互动数、相对时间、status 链接）。
+nitter.net 的 RSS 端点已禁用，故默认走 HTML。
+
+解析策略（resilient）：
+  - 主路径：用 html.parser.HTMLParser 遍历，按 class="timeline-item" 切分推文块
+  - 兜底：正则提取所有 status 链接（/<handle>/status/<id>），最稳定信号
+  - 每条推文提取：id / text / created_at / url / public_metrics?
+"""
+import re
+import time
+import urllib.request
+import urllib.parse
+import html as html_module
+from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
+
+from . import TweetSource
+
+# 时区
+_TZ_LOCAL = timezone(timedelta(hours=8))  # 东八区
+
+# 推文 status 链接正则：/<handle>/status/<digits>
+_STATUS_RE = re.compile(r'/status/(\d{5,})', re.IGNORECASE)
+# 互动数正则（仅匹配纯数字，可含千位逗号）
+_INT_RE = re.compile(r'(\d[\d,]*)')
+
+
+class _NitterTimelineParser(HTMLParser):
+    """解析 nitter 主页 HTML，提取推文列表。
+
+    nitter 主页结构（各镜像可能略有差异，本解析器做容错）：
+      <div class="timeline-item">
+        <div class="tweet-body">
+          <div class="tweet-content ...">推文正文</div>
+          ...
+          <div class="tweet-stats">
+            <span class="icon-comment"> 47 </span>
+            <span class="icon-retweet"> 21 </span>
+            <span class="icon-heart"> 14,659 </span>
+          </div>
+          <a class="tweet-date" title="Aug 20, 2026 ...">2h</a>
+        </div>
+      </div>
+      ...
+      <a class="show-more" href="/<handle>?cursor=...">Load more</a>
+    """
+
+    # 互动数 icon class → metric 名
+    _METRIC_ICONS = {
+        "icon-comment": "replies",
+        "icon-retweet": "retweets",
+        "icon-heart": "likes",
+    }
+
+    def __init__(self, handle):
+        super().__init__(convert_charrefs=True)
+        self.handle = handle.lower()
+        self.tweets = []
+        self.cursor = None  # Load more 链接的 cursor
+
+        # 解析状态
+        self._in_item = False          # 是否在 timeline-item 内
+        self._item_div_depth = 0        # timeline-item 内 div 嵌套深度（用于判定 item 结束）
+        self._cur = None                # 当前推文 dict
+        self._capture = None            # None | "content" | "metric"
+        self._metric_name = None        # 当前收集的 metric 名
+        self._buf = []                  # 当前捕获的文本片段
+        self._stats = {}                # 当前 item 的互动数
+        self._date_title = None         # 当前 item 的 tweet-date title
+
+    def _reset_item(self):
+        self._cur = {}
+        self._stats = {}
+        self._date_title = None
+        self._capture = None
+        self._metric_name = None
+        self._buf = []
+
+    def _flush_capture(self):
+        """结束当前捕获，把 _buf 写入对应字段。"""
+        if self._capture is None:
+            return
+        text = "".join(self._buf).strip()
+        self._buf = []
+        mode = self._capture
+        self._capture = None
+        if not text:
+            self._metric_name = None
+            return
+        if mode == "content":
+            if self._cur is not None and "text" not in self._cur:
+                self._cur["text"] = text
+        elif mode == "metric":
+            if self._metric_name and self._cur is not None:
+                m = _INT_RE.search(text)
+                if m:
+                    try:
+                        self._stats[self._metric_name] = int(m.group(1).replace(",", ""))
+                    except ValueError:
+                        pass
+            self._metric_name = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs_d = dict(attrs)
+        cls = attrs_d.get("class", "")
+
+        # timeline-item 开始
+        if "timeline-item" in cls:
+            self._in_item = True
+            self._item_div_depth = 0
+            self._reset_item()
+            return
+
+        # Load more 链接（cursor 翻页）
+        if "show-more" in cls:
+            href = attrs_d.get("href", "")
+            cursor_m = re.search(r'cursor=([^&"]+)', href)
+            if cursor_m:
+                self.cursor = urllib.parse.unquote(cursor_m.group(1))
+            return
+
+        if not self._in_item:
+            return
+
+        # div 嵌套深度（仅对 div 计，用于判定 item 结束）
+        if tag == "div":
+            self._item_div_depth += 1
+
+        # 推文正文容器
+        if "tweet-content" in cls:
+            self._flush_capture()
+            self._capture = "content"
+            self._buf = []
+            return
+
+        # status 链接（最可靠：id + url）
+        href = attrs_d.get("href", "")
+        m = _STATUS_RE.search(href)
+        if m and self._cur is not None:
+            tid = m.group(1)
+            if "id" not in self._cur:
+                self._cur["id"] = tid
+            if "url" not in self._cur:
+                self._cur["url"] = href if href.startswith("http") else None
+
+        # 互动数 icon
+        for icon_cls, metric in self._METRIC_ICONS.items():
+            if icon_cls in cls:
+                self._flush_capture()
+                self._capture = "metric"
+                self._metric_name = metric
+                self._buf = []
+                return
+
+        # tweet-date（title 属性含绝对时间）或 <time datetime=...>
+        if tag == "a" and "tweet-date" in cls:
+            t = attrs_d.get("title")
+            if t:
+                self._date_title = t
+        if tag == "time" and attrs_d.get("datetime"):
+            if self._cur is not None and "created_at" not in self._cur:
+                self._cur["created_at"] = attrs_d["datetime"]
+
+    def handle_endtag(self, tag):
+        if not self._in_item:
+            return
+        # 任何捕获中的标签关闭都结束当前捕获
+        if self._capture is not None and tag in ("div", "span", "a", "p", "time"):
+            self._flush_capture()
+        # div 深度递减，判定 item 结束
+        if tag == "div":
+            self._item_div_depth -= 1
+            if self._item_div_depth <= 0:
+                self._in_item = False
+                self._flush_capture()
+                if self._cur and "id" in self._cur:
+                    if self._stats:
+                        self._cur["public_metrics"] = dict(self._stats)
+                    if "created_at" not in self._cur and self._date_title:
+                        self._cur["created_at"] = self._date_title
+                    if "url" not in self._cur:
+                        self._cur["url"] = None
+                    if "text" not in self._cur:
+                        self._cur["text"] = ""
+                    self.tweets.append(self._cur)
+                self._cur = None
+
+    def handle_data(self, data):
+        if self._capture is not None:
+            self._buf.append(data)
+
+    def handle_startendtag(self, tag, attrs):
+        # <br/> 等：在 content 模式下插入换行
+        if self._capture == "content" and tag == "br":
+            self._buf.append("\n")
+
+
+def _fetch_html(mirror, handle, timeout, cursor=None):
+    """请求 nitter 镜像的 handle 页面，返回 HTML 文本或 None。"""
+    url = f"{mirror.rstrip('/')}/{handle}"
+    if cursor:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}cursor={urllib.parse.quote(cursor)}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en,zh;q=0.9",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode("utf-8", errors="replace")
+    except Exception:
+        return None
+
+
+def _parse_created_at(value, fetched_at):
+    """nitter 时间字段可能是绝对（ISO/datetime title）或相对（'2h','1d'），统一转 ISO 字符串。"""
+    if not value:
+        return None
+    value = value.strip()
+    # 相对时间：2h, 1d, 3m, 1w
+    m = re.match(r'^(\d+)\s*([smhdw])$', value, re.IGNORECASE)
+    if m and fetched_at:
+        n = int(m.group(1))
+        unit = m.group(2).lower()
+        deltas = {
+            "s": timedelta(seconds=n),
+            "m": timedelta(minutes=n),
+            "h": timedelta(hours=n),
+            "d": timedelta(days=n),
+            "w": timedelta(weeks=n),
+        }
+        dt = fetched_at - deltas.get(unit, timedelta(0))
+        return dt.isoformat()
+    # 绝对时间格式：Aug 20, 2026 08:30:00 · UTC / Aug 20, 2026 / ISO
+    for fmt in ("%b %d, %Y %H:%M:%S", "%b %d, %Y", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(value.split(" · ")[0].strip(), fmt).isoformat()
+        except ValueError:
+            continue
+    return value  # 原样保留，Agent 不依赖此字段做权重
+
+
+def _fallback_regex_parse(html_text, handle, fetched_at, mirror):
+    """正则兜底解析：当 HTMLParser 提取失败时，用正则提取所有 status 链接对应的推文。
+
+    这是最稳定的信号——优先提取 id 和 url，正文尽量从 tweet-content 提取。
+    """
+    tweets = []
+    seen_ids = set()
+    # 找所有 timeline-item 片段
+    items = re.split(r'class="timeline-item', html_text)
+    for chunk in items[1:]:  # 跳过第一个（页面前导）
+        m = _STATUS_RE.search(chunk[:5000])
+        if not m:
+            continue
+        tid = m.group(1)
+        if tid in seen_ids:
+            continue
+        seen_ids.add(tid)
+        # 尝试提取正文
+        text_match = re.search(r'class="[^"]*tweet-content[^"]*"[^>]*>(.*?)</div>', chunk, re.DOTALL)
+        text = ""
+        if text_match:
+            text = html_module.unescape(re.sub(r'<[^>]+>', '', text_match.group(1))).strip()
+        # 时间
+        created = None
+        time_m = re.search(r'<time[^>]*datetime="([^"]+)"', chunk) or re.search(r'title="([^"]+)"[^>]*class="tweet-date"', chunk)
+        if time_m:
+            created = _parse_created_at(time_m.group(1), fetched_at)
+        url = f"{mirror.rstrip('/')}/{handle}/status/{tid}"
+        tweets.append({
+            "id": tid,
+            "text": text,
+            "url": url,
+            "created_at": created,
+        })
+    return tweets
+
+
+class NitterHtmlSource(TweetSource):
+    """Nitter HTML 抓取 source。"""
+
+    name = "nitter_html"
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.mirrors = config.get("mirrors", ["https://nitter.net"])
+        self.max_pages = config.get("max_pages", 2)
+        self.timeout = config.get("request_timeout", 10)
+
+    def fetch_recent(self, handle, max_results, days_window):
+        handle = handle.lstrip("@")
+        fetched_at = datetime.now(_TZ_LOCAL)
+        tweets = []
+        seen_ids = set()
+        used_mirror = None
+        cursor = None
+        error = None
+
+        for page in range(self.max_pages):
+            # 镜像 failover：第一页选定一个可用镜像，后续页沿用
+            html_text = None
+            for mirror in self.mirrors:
+                html_text = _fetch_html(mirror, handle, self.timeout, cursor)
+                if html_text and ("timeline" in html_text or _STATUS_RE.search(html_text)):
+                    used_mirror = mirror
+                    break
+                time.sleep(0.3)
+            if not html_text:
+                error = f"all mirrors failed for {handle} (page {page})"
+                break
+            if not used_mirror:
+                used_mirror = self.mirrors[0]
+
+            # 解析
+            parser = _NitterTimelineParser(handle)
+            try:
+                parser.feed(html_text)
+                page_tweets = parser.tweets
+            except Exception:
+                page_tweets = []
+            if not page_tweets:
+                page_tweets = _fallback_regex_parse(html_text, handle, fetched_at, used_mirror)
+
+            # 后处理：补全 url、created_at
+            for t in page_tweets:
+                if t["id"] in seen_ids:
+                    continue
+                seen_ids.add(t["id"])
+                if not t.get("url"):
+                    t["url"] = f"{used_mirror.rstrip('/')}/{handle}/status/{t['id']}"
+                if t.get("created_at"):
+                    t["created_at"] = _parse_created_at(t["created_at"], fetched_at)
+                else:
+                    t["created_at"] = None
+                tweets.append(t)
+                if len(tweets) >= max_results:
+                    break
+
+            # 时间窗口过滤
+            if days_window and days_window > 0:
+                cutoff = fetched_at - timedelta(days=days_window)
+                tweets = [t for t in tweets if not t.get("created_at") or _within_window(t["created_at"], cutoff)]
+
+            if len(tweets) >= max_results:
+                break
+            # 翻页 cursor
+            cursor = parser.cursor
+            if not cursor:
+                # 兜底：正则找 Load more 链接
+                more_m = re.search(r'href="[^"]*cursor=([^&"]+)', html_text)
+                if more_m:
+                    cursor = urllib.parse.unquote(more_m.group(1))
+            if not cursor:
+                break
+            time.sleep(0.5)
+
+        # 限制到 max_results
+        tweets = tweets[:max_results]
+        if not tweets and not error:
+            error = f"no tweets found for {handle}"
+        return {"ok": bool(tweets), "tweets": tweets, "error": error}
+
+
+def _within_window(created_at_str, cutoff):
+    """粗略判断 created_at 是否在窗口内（容忍解析失败，默认 True）。"""
+    if not created_at_str:
+        return True  # 无法解析则保留
+    try:
+        s = created_at_str.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_TZ_LOCAL)
+        return dt >= cutoff
+    except Exception:
+        return True
