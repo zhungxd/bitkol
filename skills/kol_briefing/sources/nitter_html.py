@@ -74,6 +74,7 @@ class _NitterTimelineParser(HTMLParser):
         self._stats = {}                # 当前 item 的互动数
         self._date_title = None         # tweet-date 内层 a 的 title（绝对时间）
         self._date_text = None          # tweet-date 文本（相对时间，如 "7h"）
+        self._quote = None              # 当前 item 内的引用推文 {author, id, text}
 
     def _reset_item(self):
         self._cur = {}
@@ -85,6 +86,7 @@ class _NitterTimelineParser(HTMLParser):
         self._capture_depth = 0
         self._metric_name = None
         self._buf = []
+        self._quote = None
 
     def _start_capture(self, mode, tag):
         """开启新的 capture 模式，记录开启它的 tag。"""
@@ -123,6 +125,10 @@ class _NitterTimelineParser(HTMLParser):
                 self._cur["created_at"] = self._date_title or text or None
             self._date_title = None
             self._date_text = None
+        elif mode == "quote_text":
+            # 引用推文正文
+            if self._quote is not None and "text" not in self._quote:
+                self._quote["text"] = text
 
     def handle_starttag(self, tag, attrs):
         attrs_d = dict(attrs)
@@ -160,14 +166,39 @@ class _NitterTimelineParser(HTMLParser):
             self._start_capture("content", tag)
             return
 
-        # status 链接（最可靠：id + url）
+        # status 链接（最可靠：id + url）。
+        # 转推时该链接路径含原作者 handle（如 /DonaldJTrumpJr/status/123），
+        # 原创时为本 KOL 自身 —— 用于识别转推与原文作者。
         href = attrs_d.get("href", "")
         m = _STATUS_RE.search(href)
-        if m and self._cur is not None:
+        if m and self._cur is not None and self._quote is None:
             tid = m.group(1)
             if "id" not in self._cur:
                 self._cur["id"] = tid
+                author = href.split("/status/")[0].lstrip("/").split("?")[0].split("#")[0].strip("/")
+                if author:
+                    self._cur["author"] = author
             # URL 由外层 fetch_recent 用 mirror 拼接，parser 不存 url
+
+        # 引用推文容器（quote tweet）：<div class="quote quote-container">
+        if "quote-container" in cls or "quote-big" in cls:
+            self._quote = {}
+            return
+
+        # 引用推文链接：<a class="quote-link" href="/<author>/status/<id>">
+        if self._quote is not None and "quote-link" in cls:
+            qm = _STATUS_RE.search(href)
+            if qm:
+                self._quote["id"] = qm.group(1)
+                qa = href.split("/status/")[0].lstrip("/").split("?")[0].split("#")[0].strip("/")
+                if qa:
+                    self._quote["author"] = qa
+            return
+
+        # 引用推文正文：<div class="quote-text">...</div>
+        if "quote-text" in cls:
+            self._start_capture("quote_text", tag)
+            return
 
         # tweet-stat 容器（外层 span，nitter 当前结构）：
         #   <span class="tweet-stat"><div class="icon-container">
@@ -232,8 +263,18 @@ class _NitterTimelineParser(HTMLParser):
                         self._cur["url"] = None  # 外层 fetch_recent 用 mirror 拼
                     if "text" not in self._cur:
                         self._cur["text"] = ""
+                    # 转推识别：status 链接作者 ≠ 本 KOL → 记录原作者
+                    author = self._cur.get("author")
+                    if author and author.lower() != self.handle:
+                        self._cur["retweet_of"] = author
+                    # 引用推文
+                    if self._quote and self._quote.get("text"):
+                        self._cur["quoted"] = {
+                            k: self._quote[k] for k in ("author", "id", "text") if k in self._quote
+                        }
                     self.tweets.append(self._cur)
                 self._cur = None
+                self._quote = None
 
     def handle_data(self, data):
         if self._capture is not None:
@@ -371,6 +412,7 @@ class NitterHtmlSource(TweetSource):
         used_mirror = None
         cursor = None
         error = None
+        parsed_total = 0  # 解析出的推文总数（窗口过滤前），用于区分「没发推」和「抓取失败」
 
         for page in range(self.max_pages):
             # 镜像 failover：第一页选定一个可用镜像，后续页沿用
@@ -396,6 +438,7 @@ class NitterHtmlSource(TweetSource):
                 page_tweets = []
             if not page_tweets:
                 page_tweets = _fallback_regex_parse(html_text, handle, fetched_at, used_mirror)
+            parsed_total += len(page_tweets)
 
             # 后处理：补全 url、created_at
             for t in page_tweets:
@@ -434,7 +477,10 @@ class NitterHtmlSource(TweetSource):
         # 限制到 max_results
         tweets = tweets[:max_results]
         if not tweets and not error:
-            error = f"no tweets found for {handle}"
+            if parsed_total:
+                error = f"no tweets in last {days_window}d for {handle} (parsed {parsed_total}, all older)"
+            else:
+                error = f"no tweets found for {handle}"
         return {"ok": bool(tweets), "tweets": tweets, "error": error}
 
 

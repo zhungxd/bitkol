@@ -5,12 +5,15 @@
 把分散的 data/views/*.jsonl + data/x_kol_list.jsonl + 权重逻辑合成单文件输入。
 Agent 读取此 JSON 后用自身 LLM 能力生成简报（脚本不调用任何 LLM）。
 
+日报口径：按一个日历日（本地时区 UTC+8）过滤推文，默认出前一天（T-1）的日报
+（一天走完数据才完整）。更早的日期不自动补，需要时显式传 --date。
+
 Input : data/views/<handle>.jsonl, data/x_kol_list.jsonl, skills/kol_briefing/config.toml, skills/kol_briefing/weights.py
 Output: data/briefings/_input/<date>_<partition>.json（crypto 与 us_stock 各一）
 
 用法:
-  python3 scripts/prep_briefing_input.py              # 按 config 默认窗口
-  python3 scripts/prep_briefing_input.py --days 3      # 覆盖窗口
+  python3 scripts/prep_briefing_input.py                        # 前一天（T-1）日报
+  python3 scripts/prep_briefing_input.py --date 2026-08-23      # 指定日期（补报/当天）
 """
 import sys
 import json
@@ -41,13 +44,12 @@ def load_kols(kol_list_path):
     return kols
 
 
-def load_tweets(handle, days_window, now):
-    """读 data/views/<handle>.jsonl，按时间窗口过滤。返回推文列表。"""
+def load_tweets(handle, report_date):
+    """读 data/views/<handle>.jsonl，只保留本地时区（UTC+8）日历日 == report_date 的推文。"""
     path = VIEWS_DIR / f"{handle}.jsonl"
     if not path.exists():
         return []
     tweets = []
-    cutoff = now - timedelta(days=days_window) if days_window and days_window > 0 else None
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
@@ -56,23 +58,25 @@ def load_tweets(handle, days_window, now):
             t = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if cutoff and t.get("created_at"):
-            try:
-                s = t["created_at"].replace("Z", "+00:00")
-                dt = datetime.fromisoformat(s)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=_TZ_LOCAL)
-                if dt < cutoff:
-                    continue
-            except Exception:
-                pass  # 无法解析则保留
+        ca = t.get("created_at")
+        if not ca:
+            continue
+        try:
+            s = ca.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=_TZ_LOCAL)
+            if dt.astimezone(_TZ_LOCAL).date() != report_date:
+                continue
+        except Exception:
+            continue
         tweets.append(t)
     return tweets
 
 
 # ---- CLI ----
-ap = argparse.ArgumentParser(description="聚合 KOL 推文+权重+分区 → briefing input JSON")
-ap.add_argument("--days", type=int, default=None, help="时间窗口（天），覆盖 config")
+ap = argparse.ArgumentParser(description="聚合 KOL 推文+权重+分区 → 日报 briefing input JSON")
+ap.add_argument("--date", type=str, default=None, help="日报日期 YYYY-MM-DD，默认前一天 T-1（更早的不自动补）")
 args = ap.parse_args()
 
 from config_loader import load_config
@@ -80,15 +84,21 @@ from weights import select_kols_for_partition, compute_weights
 
 config = load_config(CONFIG_PATH)
 collect_cfg = config.get("collect", {})
-days_window = args.days if args.days is not None else collect_cfg.get("days_window", 7)
 max_per_kol = collect_cfg.get("max_per_kol", 20)
 
 now = datetime.now(_TZ_LOCAL)
-date_str = now.strftime("%Y-%m-%d")
+if args.date:
+    try:
+        report_date = datetime.strptime(args.date, "%Y-%m-%d").date()
+    except ValueError:
+        sys.exit(f"[error] --date 格式应为 YYYY-MM-DD，收到: {args.date}")
+else:
+    report_date = (now - timedelta(days=1)).date()
+date_str = report_date.strftime("%Y-%m-%d")
 INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 all_kols = load_kols(KOL_LIST_PATH)
-print(f"[load] {len(all_kols)} KOLs, window={days_window}d, max_per_kol={max_per_kol}")
+print(f"[load] {len(all_kols)} KOLs, report_date={date_str}, max_per_kol={max_per_kol}")
 
 PARTITIONS = ["crypto", "us_stock"]
 PARTITION_LABELS = {"crypto": "加密货币", "us_stock": "美股"}
@@ -104,7 +114,7 @@ for partition in PARTITIONS:
     total_tweets = 0
     for k in selected:
         handle = k.get("handle")
-        tweets = load_tweets(handle, days_window, now)
+        tweets = load_tweets(handle, report_date)
         # 限制每 KOL 最多 max_per_kol 条（按 created_at 降序优先最近的）
         if len(tweets) > max_per_kol:
             tweets = sorted(tweets, key=lambda t: t.get("created_at") or "", reverse=True)[:max_per_kol]
@@ -152,6 +162,8 @@ for partition in PARTITIONS:
                     "text": t.get("text", ""),
                     "url": t.get("url", ""),
                     "public_metrics": t.get("public_metrics"),
+                    "retweet_of": t.get("retweet_of"),
+                    "quoted": t.get("quoted"),
                 }
                 for t in tweets
             ],
@@ -164,7 +176,7 @@ for partition in PARTITIONS:
         "partition": partition,
         "partition_label": PARTITION_LABELS[partition],
         "generated_at": now.isoformat(),
-        "window": {"days": days_window, "max_per_kol": max_per_kol},
+        "window": {"days": 1, "date": date_str, "max_per_kol": max_per_kol},
         "stats": {
             "kol_total": len(selected),
             "kol_with_tweets": len(kols_with_tweets),

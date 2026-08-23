@@ -63,6 +63,7 @@ bitkol/
 | `source` | string | 数据来源：`知名人物` / `知名媒体` / `知名官方` / `Biteye华语KOL榜` / `Biteye美股50人榜` |
 | `note` | string | 备注（handle 变更、粉丝接近门槛等），无则空串 |
 | `migrated_from` | string | 可选。handle 迁移来源（如 bio 声明「中文号见 @xxx」后，英文号被替换为中文号时记录旧 handle，如 `justinsuntron`） |
+| `protected` | bool | 可选。`true` 表示账号已上锁（仅粉丝可见），采集脚本自动跳过（如 `dotyyds1234`）。删除该字段即可恢复采集 |
 
 示例（首行）：
 
@@ -136,6 +137,7 @@ python3 scripts/fetch_followers.py
   - `@justinsuntron` → `@sunyuchentron`（孙宇晨，bio: "Chinese @sunyuchentron"）
   - `@DoveyWan` → `@DoveyWanCN`（万卉 Dovey Wan，bio: "@DoveyWanCN for 中文"）
   - `@JiangZhuoer` → `@JiangZhuoer2`（江卓尔，bio: "这是英文号，中文号见 @JiangZhuoer2"）
+- **已上锁账号**：`@dotyyds1234`（憨巴龙王）已设为 protected（仅粉丝可见，无法采集），名单中标记 `"protected": true`，采集脚本自动跳过；解锁后删除该字段即可恢复。
 - 榜单快照本质：`source=Biteye华语KOL榜` 的账号为 2025-09-24 影响力快照，活跃度可能变化，建议采集时校验。
 
 ## KOL 简报 Skill（已落地）
@@ -150,8 +152,8 @@ pip install curl_cffi
 
 **完整说明见 [skills/kol_briefing/SKILL.md](skills/kol_briefing/SKILL.md)，4 步执行流程：**
 
-1. **采集**：`python3 scripts/collect_tweets.py` → 推文落盘到 `data/views/<handle>.jsonl`（按 tweet id 去重追加）
-2. **聚合**：`python3 scripts/prep_briefing_input.py` → 输出 `data/briefings/_input/<date>_<partition>.json`（含权重 / breakdown / 分区）
+1. **采集**：`python3 scripts/collect_tweets.py` → 推文落盘到 `data/views/<handle>.jsonl`（按 tweet id 去重追加；转推/引用推文带 `retweet_of` / `quoted` 字段。补全历史数据的转推信息可加 `--refetch`：重抓窗口内推文并合并重写，同 id 新数据优先、旧数据不丢）
+2. **聚合**：`python3 scripts/prep_briefing_input.py` → 输出 `data/briefings/_input/<date>_<partition>.json`（含权重 / breakdown / 分区 / 转推与引用信息）
 3. **分析**：Agent 用 `Read` 工具打开 _input JSON，按 [prompts/briefing_system.md](skills/kol_briefing/prompts/briefing_system.md) 的原则与立场判定速查分析
 4. **输出**：按 [prompts/briefing_template.md](skills/kol_briefing/prompts/briefing_template.md) 模板生成 `data/briefings/<date>_<partition>.md`
 
@@ -188,6 +190,9 @@ pip install curl_cffi
 | `text` | 推文全文 |
 | `url` | 推文链接 |
 | `public_metrics` | `{replies, retweets, likes}`（如源支持） |
+| `author` | 可选。推文作者 handle（从 status 链接路径提取；转推时为原作者，原创时等于本 KOL） |
+| `retweet_of` | 可选。转推标识：原作者 handle（status 链接作者 ≠ 本 KOL 时记录） |
+| `quoted` | 可选。引用推文 `{author, id, text}`（被引用推文的作者 / id / 正文） |
 | `fetched_at` | 抓取时间戳 |
 | `handle` | 所属 KOL handle |
 
@@ -211,6 +216,9 @@ python3 -m http.server 8765
 - **搜索**：KOL 名 / handle / 推文内容关键词
 - **KOL 聚合长列表**：每个 KOL 一个 section（头像 + 名 + handle + 类型/赛道标签 + 关注/权重/推文数统计），默认展开全部推文，点击头部折叠
 - **推文渲染**：保留换行，@mention / #hashtag / $TICKER / URL 自动链接化，互动数据 + 原文外链
+- **转推展示**：绿色「转推自 @原作者」标识条（原作者可点击跳 x.com），外链按钮变「原推 ↗」直指原推
+- **引用推文卡片**：正文下方嵌套引用块（橙色竖线 + @原作者 + 引用正文，超 200 字渐隐截断），整卡可点跳原推
+- **搜索增强**：转推者 handle、引用推文正文也纳入关键词匹配
 - **头像三级 fallback**：Twitter 原始 URL → Nitter 镜像 URL → 首字母色块（配色按 handle hash）
 - **cache-busting**：所有 fetch 带时间戳参数，刷新即最新数据，不受浏览器缓存影响
 

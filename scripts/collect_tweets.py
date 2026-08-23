@@ -37,13 +37,21 @@ _TZ_LOCAL = timezone(timedelta(hours=8))
 
 
 def load_kols(kol_list_path, partition=None):
-    """加载 KOL 名单。partition 过滤：crypto/us_stock（both 两边都含）。"""
+    """加载 KOL 名单。partition 过滤：crypto/us_stock（both 两边都含）。
+    跳过 protected=true 的账号（已上锁，仅粉丝可见，无法采集）。"""
     kols = []
+    skipped = []
     for line in kol_list_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
-        kols.append(json.loads(line))
+        d = json.loads(line)
+        if d.get("protected"):
+            skipped.append(d.get("handle"))
+            continue
+        kols.append(d)
+    if skipped:
+        print(f"[skip] protected 账号不采集: {', '.join(skipped)}")
     if partition:
         both_to = ["crypto", "us_stock"]
         kols = [k for k in kols if k.get("category") == partition or
@@ -75,20 +83,55 @@ def append_tweets(view_path, tweets, handle):
     now_iso = datetime.now(_TZ_LOCAL).isoformat()
     with open(view_path, "a", encoding="utf-8") as f:
         for t in tweets:
-            t["fetched_at"] = now_iso
-            t["handle"] = handle
-            # 字段顺序：id, created_at, text, url, public_metrics, fetched_at, handle
-            ordered = {
-                "id": t.get("id"),
-                "created_at": t.get("created_at"),
-                "text": t.get("text", ""),
-                "url": t.get("url", ""),
-            }
-            if t.get("public_metrics"):
-                ordered["public_metrics"] = t["public_metrics"]
-            ordered["fetched_at"] = now_iso
-            ordered["handle"] = handle
-            f.write(json.dumps(ordered, ensure_ascii=False) + "\n")
+            f.write(json.dumps(format_tweet(t, handle, now_iso), ensure_ascii=False) + "\n")
+
+
+def format_tweet(t, handle, now_iso):
+    """推文字段白名单 + 固定顺序（含转推/引用信息）。"""
+    ordered = {
+        "id": t.get("id"),
+        "created_at": t.get("created_at"),
+        "text": t.get("text", ""),
+        "url": t.get("url", ""),
+    }
+    if t.get("public_metrics"):
+        ordered["public_metrics"] = t["public_metrics"]
+    # 转推：原作者 handle（status 链接作者 ≠ 本 KOL）
+    if t.get("author"):
+        ordered["author"] = t["author"]
+    if t.get("retweet_of"):
+        ordered["retweet_of"] = t["retweet_of"]
+    # 引用推文：{author, id, text}
+    if t.get("quoted"):
+        ordered["quoted"] = t["quoted"]
+    ordered["fetched_at"] = now_iso
+    ordered["handle"] = handle
+    return ordered
+
+
+def rewrite_tweets(view_path, tweets, handle):
+    """合并重写 data/views/<handle>.jsonl（--refetch 用）。
+
+    同 id 时新数据优先（补全 author/retweet_of/quoted 字段），旧数据独有条目保留。
+    """
+    existing = []
+    if view_path.exists():
+        for line in view_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    existing.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    now_iso = datetime.now(_TZ_LOCAL).isoformat()
+    new_by_id = {t.get("id"): format_tweet(t, handle, now_iso) for t in tweets if t.get("id")}
+    old_by_id = {t.get("id"): t for t in existing if t.get("id")}
+    merged = {**old_by_id, **new_by_id}  # 新数据覆盖同 id 旧数据
+    view_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(view_path, "w", encoding="utf-8") as f:
+        for t in merged.values():
+            f.write(json.dumps(t, ensure_ascii=False) + "\n")
+    return len(new_by_id), len(merged)
 
 
 # ---- CLI ----
@@ -98,6 +141,7 @@ ap.add_argument("--max-per-kol", type=int, default=None, help="每 KOL 最多采
 ap.add_argument("--handle", type=str, default=None, help="只抓单个 handle（调试/验证用）")
 ap.add_argument("--partition", type=str, default=None, choices=["crypto", "us_stock"], help="只抓该分区（含 both）")
 ap.add_argument("--source", type=str, default=None, help="临时覆盖 active_source（不改 config）")
+ap.add_argument("--refetch", action="store_true", help="重抓窗口内推文并合并重写（补全转推/引用等字段，旧数据不丢）")
 args = ap.parse_args()
 
 # 加载配置
@@ -142,11 +186,17 @@ for i, k in enumerate(kols):
         continue
 
     all_tweets = result.get("tweets", [])
-    new_tweets = [t for t in all_tweets if t.get("id") and t["id"] not in existing_ids]
-    if new_tweets:
-        append_tweets(view_path, new_tweets, handle)
-    print(f"got={len(all_tweets)} new={len(new_tweets)} total={len(existing_ids)+len(new_tweets)}")
-    total_new += len(new_tweets)
+    if args.refetch:
+        # 合并重写：同 id 用新数据（补全字段），旧数据独有条目保留
+        got_n, merged_n = rewrite_tweets(view_path, all_tweets, handle)
+        print(f"refetched={got_n} merged_total={merged_n}")
+        total_new += got_n
+    else:
+        new_tweets = [t for t in all_tweets if t.get("id") and t["id"] not in existing_ids]
+        if new_tweets:
+            append_tweets(view_path, new_tweets, handle)
+        print(f"got={len(all_tweets)} new={len(new_tweets)} total={len(existing_ids)+len(new_tweets)}")
+        total_new += len(new_tweets)
     time.sleep(rate_limit)
 
 # 汇总

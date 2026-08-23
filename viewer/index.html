@@ -4,12 +4,48 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>KOL 发言浏览器 · bitkol</title>
+<script>
+// 尽早应用主题（默认白天），localStorage 记忆上次选择，避免刷新闪屏
+(function () {
+  var t = null;
+  try { t = localStorage.getItem('bitkol-theme'); } catch (e) {}
+  document.documentElement.dataset.theme = t === 'dark' ? 'dark' : 'light';
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;700;900&family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root {
-  /* 编辑/杂志风暗色主题 */
+  /* 编辑/杂志风亮色主题（默认白天） */
+  color-scheme: light;
+  --bg: #faf9f5;
+  --bg-elev: #ffffff;
+  --bg-card: #ffffff;
+  --bg-hover: #f4f1ea;
+  --bg-stripe: #f6f4ee;
+  --fg: #1c222b;
+  --fg-soft: #333b47;
+  --fg-muted: #71798a;
+  --fg-faint: #a3aab8;
+  --accent: #b45309;           /* 琥珀色主高亮（亮色下加深保证对比度） */
+  --accent-soft: #b4530920;
+  --accent-2: #157347;          /* 翠绿色看多 */
+  --accent-3: #d93831;          /* 朱砂色看空 */
+  --border: #e3ded3;
+  --border-soft: #ebe7dc;
+  --shadow: 0 1px 0 rgba(0,0,0,0.03), 0 8px 24px rgba(0,0,0,0.07);
+  --header-bg: rgba(250, 249, 245, 0.92);
+  --glow-1: rgba(180, 83, 9, 0.04);
+  --glow-2: rgba(21, 115, 71, 0.03);
+  --serif: 'Noto Serif SC', 'Source Han Serif SC', Georgia, serif;
+  --sans: 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+}
+
+html[data-theme="dark"] {
+  /* 编辑/杂志风暗色主题（原黑夜风格，可切换） */
+  color-scheme: dark;
   --bg: #0a0e14;
   --bg-elev: #11161d;
   --bg-card: #161c24;
@@ -26,9 +62,9 @@
   --border: #1f2730;
   --border-soft: #161d24;
   --shadow: 0 1px 0 rgba(0,0,0,0.4), 0 8px 24px rgba(0,0,0,0.5);
-  --serif: 'Noto Serif SC', 'Source Han Serif SC', Georgia, serif;
-  --sans: 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
-  --mono: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  --header-bg: rgba(10, 14, 20, 0.92);
+  --glow-1: rgba(240, 180, 41, 0.04);
+  --glow-2: rgba(63, 185, 80, 0.03);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -43,9 +79,14 @@ body {
   -webkit-font-smoothing: antialiased;
   /* 微妙的背景纹理：径向渐变 + 噪点感 */
   background-image:
-    radial-gradient(circle at 20% 0%, rgba(240, 180, 41, 0.04) 0%, transparent 40%),
-    radial-gradient(circle at 80% 100%, rgba(63, 185, 80, 0.03) 0%, transparent 50%);
+    radial-gradient(circle at 20% 0%, var(--glow-1) 0%, transparent 40%),
+    radial-gradient(circle at 80% 100%, var(--glow-2) 0%, transparent 50%);
   background-attachment: fixed;
+}
+
+/* 主题切换时的柔和过渡 */
+body, .app-header, .kol-section, .status-bar, .tweet {
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
 }
 
 /* ============ 顶部 Header ============ */
@@ -53,7 +94,7 @@ body {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(10, 14, 20, 0.92);
+  background: var(--header-bg);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
   border-bottom: 1px solid var(--border);
@@ -504,6 +545,73 @@ body {
   color: var(--accent);
 }
 
+/* ============ 转推 / 引用 ============ */
+.retweet-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--accent-2);
+  background: color-mix(in srgb, var(--accent-2) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-2) 30%, transparent);
+  padding: 3px 9px;
+  border-radius: 3px;
+  width: fit-content;
+}
+.retweet-badge a {
+  color: var(--accent-2);
+  text-decoration: none;
+  font-weight: 500;
+  border-bottom: 1px dotted color-mix(in srgb, var(--accent-2) 50%, transparent);
+}
+.retweet-badge a:hover { opacity: 0.7; }
+
+.tweet-quote {
+  display: block;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  border-radius: 4px;
+  padding: 10px 14px;
+  text-decoration: none;
+  background: var(--bg-stripe);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.tweet-quote:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+.tweet-quote .quote-author {
+  display: block;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.tweet-quote .quote-text {
+  display: block;
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+  max-height: 120px;
+  overflow: hidden;
+  position: relative;
+}
+.tweet-quote .quote-text.truncated::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 34px;
+  background: linear-gradient(transparent, var(--bg-stripe));
+}
+
 .tweet-footer {
   display: flex;
   align-items: center;
@@ -690,6 +798,14 @@ body {
       <div class="search-box">
         <input type="text" id="search-input" placeholder="搜索 KOL 名 / handle / 推文内容...">
       </div>
+
+      <div class="control-group">
+        <label class="control-label">主题</label>
+        <div class="partition-toggle" id="theme-toggle">
+          <button data-theme="light" class="active">白天</button>
+          <button data-theme="dark">黑夜</button>
+        </div>
+      </div>
     </div>
   </div>
 </header>
@@ -697,7 +813,7 @@ body {
 <main class="main">
   <div class="status-bar" id="status-bar" style="display:none;">
     <div class="status-item">
-      <span class="status-label">入选 KOL</span>
+      <span class="status-label">当日 KOL</span>
       <span class="status-value green" id="stat-with-tweets">—</span>
     </div>
     <div class="status-separator"></div>
@@ -707,7 +823,7 @@ body {
     </div>
     <div class="status-separator"></div>
     <div class="status-item">
-      <span class="status-label">推文总数</span>
+      <span class="status-label">当日推文</span>
       <span class="status-value accent" id="stat-tweets">—</span>
     </div>
     <div class="status-separator"></div>
@@ -742,6 +858,7 @@ const state = {
   partition: 'crypto',
   sort: 'weight',
   search: '',
+  theme: 'light',     // 'light' | 'dark'，默认白天
   data: null,         // 当前加载的 _input JSON
   avatars: {},        // handle -> { twitter, nitter }
   collapsedKols: new Set(),  // 折叠的 KOL handle 集合
@@ -754,6 +871,30 @@ const AVATARS_URL = '/data/kol_avatars.json';
 function cacheBust(url) {
   const sep = url.includes('?') ? '&' : '?';
   return `${url}${sep}_=${Date.now()}`;
+}
+
+// ============================================================
+// 主题切换（默认白天，黑夜保留可切换，localStorage 记忆）
+// ============================================================
+function applyTheme(theme) {
+  state.theme = theme;
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem('bitkol-theme', theme); } catch (e) { /* ignore */ }
+  renderThemeToggle();
+}
+
+function initTheme() {
+  let saved = null;
+  try { saved = localStorage.getItem('bitkol-theme'); } catch (e) { /* ignore */ }
+  state.theme = saved === 'dark' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = state.theme; // 与 head 内脚本保持一致
+  renderThemeToggle();
+}
+
+function renderThemeToggle() {
+  document.querySelectorAll('#theme-toggle button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.theme === state.theme);
+  });
 }
 
 // ============================================================
@@ -862,6 +1003,16 @@ function formatNum(n) {
   return (n / 1000000).toFixed(1) + 'M';
 }
 
+// created_at → 本地时区日期（YYYY-MM-DD），与 formatTime 显示的日期保持同一逻辑；解析失败返回 null
+function tweetLocalDate(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) {
+    return /^\d{4}-\d{2}-\d{2}/.test(iso) ? iso.slice(0, 10) : null;
+  }
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
 // 格式化时间
 function formatTime(iso) {
   if (!iso) return { date: '—', time: '' };
@@ -961,9 +1112,8 @@ function renderStatus() {
   }
   document.getElementById('status-bar').style.display = 'flex';
   const stats = d.stats || {};
-  document.getElementById('stat-with-tweets').textContent = stats.kol_with_tweets ?? '—';
+  // 入选 KOL / 推文总数 为当日口径，由 renderKolList 按所选日期计算
   document.getElementById('stat-total').textContent = stats.kol_total ?? '—';
-  document.getElementById('stat-tweets').textContent = stats.tweets_total ?? '—';
   document.getElementById('stat-failed').textContent = (stats.excluded_empty || []).length;
   document.getElementById('meta-window').textContent =
     `${d.window?.days ?? '?'}天 / ${d.window?.max_per_kol ?? '?'}条`;
@@ -1006,7 +1156,11 @@ function filterKols(kols) {
   return kols.filter(k => {
     if (k.name && k.name.toLowerCase().includes(q)) return true;
     if (k.handle && k.handle.toLowerCase().includes(q)) return true;
-    if (k.tweets && k.tweets.some(t => (t.text || '').toLowerCase().includes(q))) return true;
+    if (k.tweets && k.tweets.some(t =>
+      (t.text || '').toLowerCase().includes(q) ||
+      (t.retweet_of || '').toLowerCase().includes(q) ||
+      ((t.quoted && t.quoted.text) || '').toLowerCase().includes(q)
+    )) return true;
     return false;
   });
 }
@@ -1026,7 +1180,17 @@ function renderKolList() {
     return;
   }
 
-  const kols = filterKols(sortKols(d.kols || []));
+  // 只保留所选日期当天（本地时区）发布的推文；只显示当天有推文的 KOL
+  const day = state.currentDate;
+  const kolsAll = sortKols(d.kols || [])
+    .map(k => ({ ...k, tweets: (k.tweets || []).filter(t => tweetLocalDate(t.created_at) === day) }))
+    .filter(k => k.tweets.length > 0);
+
+  // 当日口径统计
+  document.getElementById('stat-with-tweets').textContent = kolsAll.length;
+  document.getElementById('stat-tweets').textContent = kolsAll.reduce((s, k) => s + k.tweets.length, 0);
+
+  const kols = filterKols(kolsAll);
   document.getElementById('stat-visible').textContent = kols.length;
 
   if (kols.length === 0) {
@@ -1157,10 +1321,46 @@ function renderKolSection(kol, collapsed, idx) {
   return `<section class="kol-section">${headerHTML}${tweetsHTML}</section>`;
 }
 
+// 推文原文链接：优先原作者（转推时指向原推）；否则 KOL handle；最后把 nitter 域名替换为 x.com
+function tweetOriginUrl(tweet, kol) {
+  if (tweet.id && (tweet.retweet_of || tweet.author)) {
+    return `https://x.com/${tweet.retweet_of || tweet.author}/status/${tweet.id}`;
+  }
+  if (kol && kol.handle && tweet.id) {
+    return `https://x.com/${kol.handle}/status/${tweet.id}`;
+  }
+  const u = tweet.url || '';
+  return u.replace(/^https?:\/\/(www\.)?(nitter\.[a-z.]+|twitter\.com)\//i, 'https://x.com/');
+}
+
 function renderTweet(tweet, kol) {
   const t = formatTime(tweet.created_at);
   const m = tweet.public_metrics || {};
-  const url = tweet.url || (kol.handle && tweet.id ? `https://x.com/${kol.handle}/status/${tweet.id}` : '');
+  const url = tweetOriginUrl(tweet, kol);
+
+  // 转推标识（原作者 ≠ 本 KOL 时显示）
+  let retweetBadgeHTML = '';
+  if (tweet.retweet_of) {
+    retweetBadgeHTML = `
+      <div class="retweet-badge">
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M3 6V3h7l-1-1 1-1 3 3-3 3-1-1 1-1H5v3H3zm10 4v3H6l1 1-1 1-3-3 3-3 1 1-1 1h5v-3h2z"/></svg>
+        转推自 <a href="https://x.com/${escapeHTML(tweet.retweet_of)}" target="_blank" rel="noopener">@${escapeHTML(tweet.retweet_of)}</a>
+      </div>`;
+  }
+
+  // 引用推文卡片
+  let quoteHTML = '';
+  if (tweet.quoted && (tweet.quoted.text || tweet.quoted.author)) {
+    const qUrl = tweet.quoted.id
+      ? `https://x.com/${tweet.quoted.author || 'i'}/status/${tweet.quoted.id}`
+      : null;
+    const qText = tweet.quoted.text || '';
+    quoteHTML = `
+      <a class="tweet-quote" ${qUrl ? `href="${escapeHTML(qUrl)}" target="_blank" rel="noopener"` : 'href="javascript:void(0)" style="cursor:default;"'}>
+        <span class="quote-author">${tweet.quoted.author ? '@' + escapeHTML(tweet.quoted.author) : '引用推文'}</span>
+        ${qText ? `<span class="quote-text${qText.length > 200 ? ' truncated' : ''}">${renderTweetText(qText)}</span>` : ''}
+      </a>`;
+  }
 
   // 简单的 SVG 图标（评论/转推/点赞）
   const iconComment = `<svg class="metric-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h12v9H6l-3 3v-3H2V2z"/></svg>`;
@@ -1168,18 +1368,20 @@ function renderTweet(tweet, kol) {
   const iconHeart = `<svg class="metric-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 14s-5-3-5-7a3 3 0 0 1 5-2 3 3 0 0 1 5 2c0 4-5 7-5 7z"/></svg>`;
 
   return `
-    <article class="tweet">
+    <article class="tweet${tweet.retweet_of ? ' is-retweet' : ''}">
       <div class="tweet-time">
         <span class="tweet-date">${t.date}</span>
         ${t.time ? `<span class="tweet-time-precise">${t.time}</span>` : ''}
       </div>
       <div class="tweet-body">
+        ${retweetBadgeHTML}
         <div class="tweet-text">${renderTweetText(tweet.text)}</div>
+        ${quoteHTML}
         <div class="tweet-footer">
           <span class="metric replies">${iconComment}${formatNum(m.replies)}</span>
           <span class="metric retweets">${iconRetweet}${formatNum(m.retweets)}</span>
           <span class="metric likes">${iconHeart}${formatNum(m.likes)}</span>
-          ${url ? `<a class="tweet-link" href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">原文 ↗</a>` : ''}
+          ${url ? `<a class="tweet-link" href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${tweet.retweet_of ? '原推 ↗' : '原文 ↗'}</a>` : ''}
         </div>
       </div>
     </article>`;
@@ -1220,6 +1422,12 @@ function bindEvents() {
       renderKolList();
     }, 150);
   });
+
+  document.getElementById('theme-toggle').addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn || btn.dataset.theme === state.theme) return;
+    applyTheme(btn.dataset.theme);
+  });
 }
 
 // ============================================================
@@ -1227,6 +1435,7 @@ function bindEvents() {
 // ============================================================
 
 async function init() {
+  initTheme();
   // 并行加载：日期列表 + 头像表
   const [dates, avatars] = await Promise.all([loadDateList(), loadAvatars()]);
   state.avatars = avatars || {};

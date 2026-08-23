@@ -52,7 +52,7 @@ data/x_kol_list.jsonl  →  data/views/*.jsonl  →  data/briefings/_input/*.jso
 ### Step 1：采集推文（可选，若 _input 已是最新可跳过）
 
 ```bash
-# 默认全量采集（按 config.toml 的 max_per_kol=20、days_window=7）
+# 默认全量采集（按 config.toml 的 max_per_kol=20、days_window=2 滚动缓冲）
 python3 scripts/collect_tweets.py
 
 # 或仅采集某分区
@@ -60,20 +60,26 @@ python3 scripts/collect_tweets.py --partition crypto
 
 # 或单 handle 调试
 python3 scripts/collect_tweets.py --handle cz_binance
+
+# 重抓窗口内推文并合并重写（补全转推/引用等新字段，旧数据不丢）
+python3 scripts/collect_tweets.py --refetch
 ```
 
 - 采集源由 `config.toml` 的 `[source].active_source` 决定，默认 `nitter_curl_cffi`（**必须** `pip install curl_cffi`）。
 - 沙箱/国内网络环境需设代理：`HTTPS_PROXY=http://127.0.0.1:7897 python3 scripts/collect_tweets.py ...`，或填 `config.toml` 的 `proxy_url`。
 - 失败的 handle 会在终端打印 `FAIL (...)`，不影响其他 KOL。镜像全挂时换 `active_source` 或加镜像。
 - 输出落盘到 `data/views/<handle>.jsonl`，按 tweet id 去重追加。
+- 转推识别：status 链接路径作者 ≠ 本 KOL 时记录 `retweet_of`（原作者）；引用推文记录 `quoted` `{author, id, text}`。二者随推文透传到 _input JSON，viewer 据此渲染转推标识与引用卡片。
+- 名单中 `"protected": true` 的账号（已上锁，如 `dotyyds1234`）自动跳过，终端打印 `[skip]`。
 
 ### Step 2：聚合 → _input JSON
 
 ```bash
-python3 scripts/prep_briefing_input.py           # 默认窗口
-python3 scripts/prep_briefing_input.py --days 3  # 覆盖窗口
+python3 scripts/prep_briefing_input.py                        # 前一天（T-1）日报（默认）
+python3 scripts/prep_briefing_input.py --date 2026-08-23      # 仅用户明确要求指定日期时
 ```
 
+- **日报口径**：只聚合该日历日（UTC+8）的推文；默认出前一天 T-1，更早日期不自动补。
 - 按 `category` 字段分 crypto / us_stock 两区，`both` 类账号同时进两份。
 - 每区按 `weights.py` 计算归一化权重（和 = 1.0），附 `weight_breakdown` 供审计。
 - 输出：`data/briefings/_input/<date>_<partition>.json`，每区一份。
@@ -88,12 +94,13 @@ python3 scripts/prep_briefing_input.py --days 3  # 覆盖窗口
 1. 用 `Read` 工具打开 JSON。
 2. 关注顶层字段：
    - `partition` / `partition_label`：分区标识
-   - `window.days` / `window.max_per_kol`：本次采集口径
+   - `window.date` / `window.max_per_kol`：本次日报口径（days 恒为 1）
    - `stats`：KOL 数、推文总数、空推文 KOL 列表
    - `kols[]`：按 `weight` 降序，每个 KOL 含 `weight` / `weight_breakdown` / `tweets[]`
 3. 分析维度见 `prompts/briefing_system.md`：
    - 市场情绪（加权看多/看空/中性）
    - 热点赛道/标的
+   - 机会与实用信息（理财/空投/事件/分析工具分享，单一来源也收）
    - 高权重 KOL 个别观点
    - 分歧与共识
    - 风险信号
@@ -117,7 +124,7 @@ python3 scripts/prep_briefing_input.py --days 3  # 覆盖窗口
 
 - `config.toml` 的 `[collect]` 调采集口径（条数/窗口/限速）。
 - `[weights]` 调权重公式各系数。改完跑一次 `prep_briefing_input.py` 看终端 top 5 是否合理。
-- KOL 名单 `data/x_kol_list.jsonl` 直接编辑，每行一个 JSON。`category ∈ {crypto, us_stock, both}`。
+- KOL 名单 `data/x_kol_list.jsonl` 直接编辑，每行一个 JSON。`category ∈ {crypto, us_stock, both}`；已上锁账号可加 `"protected": true`，采集自动跳过。
 - **handle 迁移**：KOL 有中英文双号时优先中文号。修改名单 handle 后需同步清理：删 `data/views/<旧handle>.jsonl`、从 `data/kol_avatars.json` 删旧条目、重跑 `fetch_avatars.py` + `collect_tweets.py --handle <新handle>` + `prep_briefing_input.py`。旧 handle 记录在 `migrated_from` 字段（已迁移：`justinsuntron→sunyuchentron`、`DoveyWan→DoveyWanCN`、`JiangZhuoer→JiangZhuoer2`）。
 
 ## KOL 发言浏览器（viewer/）
@@ -149,12 +156,16 @@ HTTPS_PROXY=http://127.0.0.1:7897 python3 scripts/fetch_avatars.py --handle cz_b
 | 所有 handle `FAIL (empty body)` | Nitter Caddy 反爬 JA3 指纹过滤（urllib/curl 被识别） | 切换 `active_source = "nitter_curl_cffi"` 并 `pip install curl_cffi` |
 | 所有 handle `FAIL (all mirrors failed)` | 代理未设或镜像全挂 | 沙箱/国内网络需设 `HTTPS_PROXY` 环境变量或 `config.toml` 的 `proxy_url` |
 | 某些 handle 偶发 FAIL (429) | Nitter rate limit | 调大 `request_interval` 或重跑 |
+| `no tweets in last Ns (parsed X, all older)` | KOL 低频发帖，窗口内无新推（**正常**，非失败） | 无需处理；旧数据已保留。需要历史数据可跑 `--days 60` 宽窗口回填 |
+| `no tweets found`（无 parsed 计数） | 真抓取失败：页面空/账号改名/上锁 | 用 `--handle` 单测重试；确认账号状态（fxtwitter API） |
+| `[skip] protected 账号不采集` | 名单标记 `"protected": true`（已上锁仅粉丝可见） | 预期行为；账号解锁后删名单中该字段恢复采集 |
 | 推文时间解析失败 | Nitter 模板变动 | 检查 `nitter_html.py` 的 `_parse_created_at` |
 | 权重 top 5 全是 CZ 这种超大 V | `log_base_followers` 被关 | 确保 `config.toml` 的 `log_base_followers = true` |
 | both 类账号没进简报 | `category` 字段写错 | 名单里 `category` 必须是 `crypto`/`us_stock`/`both` 三选一 |
 | viewer 刷新后数据没更新 | 浏览器缓存（已修复） | viewer 已带 cache-busting；旧版本可硬刷新或导航到 JSON URL 一次 |
 | viewer 头像不显示 | 代理未开或 `kol_avatars.json` 缺该 handle | 开代理（Twitter CDN）或重跑 `fetch_avatars.py` |
 | viewer 打不开 | http.server 未启动 | `cd bitkol && python3 -m http.server 8765` |
+| viewer 转推/引用不显示 | 历史日期的 _input JSON 是旧版（无 `retweet_of`/`quoted` 字段） | 该日期重新聚合，或接受历史视图无标识（增量数据自动带上） |
 
 ## 不在本 Skill 范围
 

@@ -145,6 +145,7 @@ class NitterCurlCffiSource(TweetSource):
         used_mirror = None
         cursor = None
         error = None
+        parsed_total = 0  # 解析出的推文总数（窗口过滤前），用于区分「没发推」和「抓取失败」
 
         for page in range(self.max_pages):
             html_text = None
@@ -172,6 +173,7 @@ class NitterCurlCffiSource(TweetSource):
                 page_tweets = []
             if not page_tweets:
                 page_tweets = _fallback_regex_parse(html_text, handle, fetched_at, used_mirror)
+            parsed_total += len(page_tweets)
 
             # 后处理：补全 url、created_at
             for t in page_tweets:
@@ -209,5 +211,8 @@ class NitterCurlCffiSource(TweetSource):
 
         tweets = tweets[:max_results]
         if not tweets and not error:
-            error = f"no tweets found for {handle}"
+            if parsed_total:
+                error = f"no tweets in last {days_window}d for {handle} (parsed {parsed_total}, all older)"
+            else:
+                error = f"no tweets found for {handle}"
         return {"ok": bool(tweets), "tweets": tweets, "error": error}

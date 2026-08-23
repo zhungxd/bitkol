@@ -49,8 +49,8 @@ request_interval = 1.0
 [collect]
 # 每个 KOL 最多采集多少条推文
 max_per_kol = 20
-# 时间窗口（天），0 表示不限
-days_window = 7
+# 采集滚动窗口（天）。日报只按日历日取数，这里留 2 天缓冲确保覆盖完整前一天
+days_window = 2
 # 每次请求间隔（秒），避免被镜像限流
 rate_limit_sec = 1.5
 
