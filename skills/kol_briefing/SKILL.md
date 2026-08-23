@@ -81,7 +81,7 @@ python3 scripts/prep_briefing_input.py --date 2026-08-23      # 仅用户明确�
 
 - **日报口径**：只聚合该日历日（UTC+8）的推文；默认出前一天 T-1，更早日期不自动补。
 - **每 KOL 条数上限**：`[briefing].daily_max_per_kol`（默认 5）。超出时优先保留原创（非转推，引用推文 QT 算原创），原创仍超出则按正文字数降序取前 N 条。
-- 按 `category` 字段分 crypto / us_stock 两区，`both` 类账号同时进两份。
+- 按 `category` 字段分 crypto / us_stock 两区，`both` 类账号只进 crypto（`[partition].both_goes_to` 可调），避免两份简报内容重复。
 - 每区按 `weights.py` 计算归一化权重（和 = 1.0），附 `weight_breakdown` 供审计。
 - 输出：`data/briefings/_input/<date>_<partition>.json`，每区一份。
 - 终端会打印 top 5 权重 KOL，用于人工 sanity check。

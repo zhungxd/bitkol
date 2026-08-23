@@ -177,7 +177,7 @@ pip install curl_cffi
 
 ### 分区逻辑
 
-按 KOL 名单的 `category` 字段分 crypto / us_stock 两区，`both` 类账号同时进两份简报。
+按 KOL 名单的 `category` 字段分 crypto / us_stock 两区，`both` 类账号只进加密简报（`config.toml` 的 `[partition].both_goes_to` 可调），避免两边重复。
 
 ### 推文数据格式（data/views/<handle>.jsonl）
 

@@ -116,5 +116,6 @@ keywords = ["BTC", "ETH", "DeFi", "空投", "链", "币", "crypto", "blockchain"
 keywords = ["美股", "SP500", "纳指", "半导体", "科技股", "财报", "期权", "宏观", "ETF", "AI算力", "芯片", "纳指100", "stock"]
 
 [partition]
-# category → partition 映射规则：both 类账号同时进入两份简报
-both_goes_to = ["crypto", "us_stock"]
+# category → partition 映射规则：both 类账号只进 crypto，不进 us_stock（避免两份简报内容重复）
+# 如需恢复两边都放，改为 ["crypto", "us_stock"]
+both_goes_to = ["crypto"]
