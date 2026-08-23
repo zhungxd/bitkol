@@ -54,6 +54,11 @@ days_window = 2
 # 每次请求间隔（秒），避免被镜像限流
 rate_limit_sec = 1.5
 
+[briefing]
+# 日报每 KOL 最多收录条数（在当天推文中选取）
+# 超出时优先原创（非转推，引用推文 QT 算原创），原创仍超出则按正文字数降序取
+daily_max_per_kol = 5
+
 [weights]
 # 权重 = base(followers) × type_mult × source_mult × track_match_bonus，分区归一化
 # base 用 log10(followers) 避免 CZ 等超大 V 压倒一切

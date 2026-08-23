@@ -83,8 +83,8 @@ from config_loader import load_config
 from weights import select_kols_for_partition, compute_weights
 
 config = load_config(CONFIG_PATH)
-collect_cfg = config.get("collect", {})
-max_per_kol = collect_cfg.get("max_per_kol", 20)
+briefing_cfg = config.get("briefing", {})
+daily_max = briefing_cfg.get("daily_max_per_kol", 5)
 
 now = datetime.now(_TZ_LOCAL)
 if args.date:
@@ -98,7 +98,7 @@ date_str = report_date.strftime("%Y-%m-%d")
 INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 all_kols = load_kols(KOL_LIST_PATH)
-print(f"[load] {len(all_kols)} KOLs, report_date={date_str}, max_per_kol={max_per_kol}")
+print(f"[load] {len(all_kols)} KOLs, report_date={date_str}, daily_max_per_kol={daily_max}")
 
 PARTITIONS = ["crypto", "us_stock"]
 PARTITION_LABELS = {"crypto": "加密货币", "us_stock": "美股"}
@@ -115,9 +115,13 @@ for partition in PARTITIONS:
     for k in selected:
         handle = k.get("handle")
         tweets = load_tweets(handle, report_date)
-        # 限制每 KOL 最多 max_per_kol 条（按 created_at 降序优先最近的）
-        if len(tweets) > max_per_kol:
-            tweets = sorted(tweets, key=lambda t: t.get("created_at") or "", reverse=True)[:max_per_kol]
+        # 日报每 KOL 最多 daily_max 条；超出时：优先原创（非转推），再按正文字数降序
+        # （引用推文 QT 有自己的观点，算原创；纯转推 text 即原文，排在后面）
+        if len(tweets) > daily_max:
+            def _pick_key(t):
+                is_retweet = 1 if t.get("retweet_of") else 0
+                return (is_retweet, -len(t.get("text") or ""))
+            tweets = sorted(tweets, key=_pick_key)[:daily_max]
         if not tweets:
             excluded_empty.append(handle)
             continue
@@ -176,7 +180,7 @@ for partition in PARTITIONS:
         "partition": partition,
         "partition_label": PARTITION_LABELS[partition],
         "generated_at": now.isoformat(),
-        "window": {"days": 1, "date": date_str, "max_per_kol": max_per_kol},
+        "window": {"days": 1, "date": date_str, "max_per_kol": daily_max},
         "stats": {
             "kol_total": len(selected),
             "kol_with_tweets": len(kols_with_tweets),

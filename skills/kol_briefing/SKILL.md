@@ -80,6 +80,7 @@ python3 scripts/prep_briefing_input.py --date 2026-08-23      # 仅用户明确�
 ```
 
 - **日报口径**：只聚合该日历日（UTC+8）的推文；默认出前一天 T-1，更早日期不自动补。
+- **每 KOL 条数上限**：`[briefing].daily_max_per_kol`（默认 5）。超出时优先保留原创（非转推，引用推文 QT 算原创），原创仍超出则按正文字数降序取前 N 条。
 - 按 `category` 字段分 crypto / us_stock 两区，`both` 类账号同时进两份。
 - 每区按 `weights.py` 计算归一化权重（和 = 1.0），附 `weight_breakdown` 供审计。
 - 输出：`data/briefings/_input/<date>_<partition>.json`，每区一份。
@@ -123,6 +124,7 @@ python3 scripts/prep_briefing_input.py --date 2026-08-23      # 仅用户明确�
 ## 调参
 
 - `config.toml` 的 `[collect]` 调采集口径（条数/窗口/限速）。
+- `config.toml` 的 `[briefing]` 调日报口径：`daily_max_per_kol`（每 KOL 日报最多收录条数，默认 5；超出时非转推优先、字数降序）。
 - `[weights]` 调权重公式各系数。改完跑一次 `prep_briefing_input.py` 看终端 top 5 是否合理。
 - KOL 名单 `data/x_kol_list.jsonl` 直接编辑，每行一个 JSON。`category ∈ {crypto, us_stock, both}`；已上锁账号可加 `"protected": true`，采集自动跳过。
 - **handle 迁移**：KOL 有中英文双号时优先中文号。修改名单 handle 后需同步清理：删 `data/views/<旧handle>.jsonl`、从 `data/kol_avatars.json` 删旧条目、重跑 `fetch_avatars.py` + `collect_tweets.py --handle <新handle>` + `prep_briefing_input.py`。旧 handle 记录在 `migrated_from` 字段（已迁移：`justinsuntron→sunyuchentron`、`DoveyWan→DoveyWanCN`、`JiangZhuoer→JiangZhuoer2`）。

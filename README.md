@@ -153,7 +153,7 @@ pip install curl_cffi
 **完整说明见 [skills/kol_briefing/SKILL.md](skills/kol_briefing/SKILL.md)，4 步执行流程：**
 
 1. **采集**：`python3 scripts/collect_tweets.py` → 推文落盘到 `data/views/<handle>.jsonl`（按 tweet id 去重追加；转推/引用推文带 `retweet_of` / `quoted` 字段。补全历史数据的转推信息可加 `--refetch`：重抓窗口内推文并合并重写，同 id 新数据优先、旧数据不丢）
-2. **聚合**：`python3 scripts/prep_briefing_input.py` → 输出 `data/briefings/_input/<date>_<partition>.json`（含权重 / breakdown / 分区 / 转推与引用信息）
+2. **聚合**：`python3 scripts/prep_briefing_input.py` → 输出 `data/briefings/_input/<date>_<partition>.json`（含权重 / breakdown / 分区 / 转推与引用信息；每 KOL 当天最多 5 条，超出时非转推优先、正文字数降序，上限可在 `config.toml` 的 `[briefing].daily_max_per_kol` 调）
 3. **分析**：Agent 用 `Read` 工具打开 _input JSON，按 [prompts/briefing_system.md](skills/kol_briefing/prompts/briefing_system.md) 的原则与立场判定速查分析
 4. **输出**：按 [prompts/briefing_template.md](skills/kol_briefing/prompts/briefing_template.md) 模板生成 `data/briefings/<date>_<partition>.md`
 
