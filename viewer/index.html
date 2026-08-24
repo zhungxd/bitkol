@@ -1235,6 +1235,14 @@ function renderKolList() {
       renderKolList();
     });
   });
+
+  // 引用卡片点击跳转（点内部链接时走链接自身，不触发）
+  container.querySelectorAll('.tweet-quote[data-url]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('a')) return;
+      window.open(el.dataset.url, '_blank', 'noopener');
+    });
+  });
 }
 
 function sortLabel() {
@@ -1349,6 +1357,9 @@ function renderTweet(tweet, kol) {
   }
 
   // 引用推文卡片
+  // 注意：外层不能用 <a>——正文里的 @mention/#tag 会被链接化成内层 <a>，
+  // a 嵌套 a 是非法 HTML，浏览器解析时会拆开重排，导致 tag 被强制换行。
+  // 改用 <div> + data-url，点击跳转由下方委托事件处理。
   let quoteHTML = '';
   if (tweet.quoted && (tweet.quoted.text || tweet.quoted.author)) {
     const qUrl = tweet.quoted.id
@@ -1356,10 +1367,10 @@ function renderTweet(tweet, kol) {
       : null;
     const qText = tweet.quoted.text || '';
     quoteHTML = `
-      <a class="tweet-quote" ${qUrl ? `href="${escapeHTML(qUrl)}" target="_blank" rel="noopener"` : 'href="javascript:void(0)" style="cursor:default;"'}>
+      <div class="tweet-quote"${qUrl ? ` data-url="${escapeHTML(qUrl)}" style="cursor:pointer;"` : ''}>
         <span class="quote-author">${tweet.quoted.author ? '@' + escapeHTML(tweet.quoted.author) : '引用推文'}</span>
         ${qText ? `<span class="quote-text${qText.length > 200 ? ' truncated' : ''}">${renderTweetText(qText)}</span>` : ''}
-      </a>`;
+      </div>`;
   }
 
   // 简单的 SVG 图标（评论/转推/点赞）
@@ -1375,7 +1386,7 @@ function renderTweet(tweet, kol) {
       </div>
       <div class="tweet-body">
         ${retweetBadgeHTML}
-        <div class="tweet-text">${renderTweetText(tweet.text)}</div>
+        ${tweet.text ? `<div class="tweet-text">${renderTweetText(tweet.text)}</div>` : ''}
         ${quoteHTML}
         <div class="tweet-footer">
           <span class="metric replies">${iconComment}${formatNum(m.replies)}</span>

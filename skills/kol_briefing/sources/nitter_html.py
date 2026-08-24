@@ -75,6 +75,7 @@ class _NitterTimelineParser(HTMLParser):
         self._date_title = None         # tweet-date 内层 a 的 title（绝对时间）
         self._date_text = None          # tweet-date 文本（相对时间，如 "7h"）
         self._quote = None              # 当前 item 内的引用推文 {author, id, text}
+        self._article = None            # 当前 item 内的 Article 长文卡片 {title, desc}
 
     def _reset_item(self):
         self._cur = {}
@@ -87,6 +88,7 @@ class _NitterTimelineParser(HTMLParser):
         self._metric_name = None
         self._buf = []
         self._quote = None
+        self._article = None
 
     def _start_capture(self, mode, tag):
         """开启新的 capture 模式，记录开启它的 tag。"""
@@ -129,6 +131,14 @@ class _NitterTimelineParser(HTMLParser):
             # 引用推文正文
             if self._quote is not None and "text" not in self._quote:
                 self._quote["text"] = text
+        elif mode == "article_title":
+            # Article 长文卡片标题
+            if self._article is not None:
+                self._article["title"] = text
+        elif mode == "article_desc":
+            # Article 长文卡片摘要
+            if self._article is not None:
+                self._article["desc"] = text
 
     def handle_starttag(self, tag, attrs):
         attrs_d = dict(attrs)
@@ -200,6 +210,21 @@ class _NitterTimelineParser(HTMLParser):
             self._start_capture("quote_text", tag)
             return
 
+        # Article 长文卡片（正文为空的文章推文）：
+        #   <div class="article-card card large">
+        #     <h2 class="card-title">标题</h2>
+        #     <p class="card-description">摘要</p>
+        if "article-card" in cls:
+            self._article = {}
+            return
+        if self._article is not None:
+            if "card-title" in cls:
+                self._start_capture("article_title", tag)
+                return
+            if "card-description" in cls:
+                self._start_capture("article_desc", tag)
+                return
+
         # tweet-stat 容器（外层 span，nitter 当前结构）：
         #   <span class="tweet-stat"><div class="icon-container">
         #     <span class="icon-comment"></span> 13
@@ -255,6 +280,20 @@ class _NitterTimelineParser(HTMLParser):
                 self._in_item = False
                 self._flush_capture()
                 if self._cur and "id" in self._cur:
+                    # Article 长文推文：正文为空，标题/摘要在文章卡片里 → 回填为正文
+                    if self._article and self._article.get("title"):
+                        if not (self._cur.get("text") or "").strip():
+                            parts = [f"[文章] {self._article['title']}"]
+                            if self._article.get("desc"):
+                                parts.append(self._article["desc"])
+                            self._cur["text"] = "\n\n".join(parts)
+                    # 过滤垃圾条目：/i/status/ 链接（不可用推文占位）解析出 author='i'，
+                    # 这类条目无正文无时间；或既无正文又无时间的解析失败条目
+                    text_empty = not (self._cur.get("text") or "").strip()
+                    if self._cur.get("author") == "i" or (text_empty and not self._cur.get("created_at")):
+                        self._cur = None
+                        self._quote = None
+                        return
                     if self._stats:
                         self._cur["public_metrics"] = dict(self._stats)
                     if "created_at" not in self._cur and self._date_title:
