@@ -142,6 +142,7 @@ ap.add_argument("--handle", type=str, default=None, help="只抓单个 handle（
 ap.add_argument("--partition", type=str, default=None, choices=["crypto", "us_stock"], help="只抓该分区（含 both）")
 ap.add_argument("--source", type=str, default=None, help="临时覆盖 active_source（不改 config）")
 ap.add_argument("--refetch", action="store_true", help="重抓窗口内推文并合并重写（补全转推/引用等字段，旧数据不丢）")
+ap.add_argument("--skip-prep", action="store_true", help="采集后不自动聚合 briefing input（默认会自动跑当天+前一天）")
 args = ap.parse_args()
 
 # 加载配置
@@ -204,3 +205,18 @@ print(f"\n=== Summary ===")
 print(f"OK: {len(kols)-len(failed)}/{len(kols)} handles, {total_new} new tweets")
 if failed:
     print(f"Failed ({len(failed)}): {', '.join(failed)}")
+
+# ---- 采集完成后自动聚合 briefing input（viewer 数据源）----
+# 重跑当天 + 前一天两个日历日，保证 viewer 的日期列表和当日数据即时更新，无需手动 prep。
+if not args.skip_prep:
+    import subprocess
+    prep_script = Path(__file__).resolve().parent / "prep_briefing_input.py"
+    now_local = datetime.now(_TZ_LOCAL)
+    for report_date in {(now_local - timedelta(days=1)).date(), now_local.date()}:
+        print(f"\n=== Auto prep briefing input for {report_date} ===")
+        r = subprocess.run(
+            [sys.executable, str(prep_script), "--date", str(report_date)],
+            cwd=str(PROJECT_ROOT),
+        )
+        if r.returncode != 0:
+            print(f"[warn] prep_briefing_input.py --date {report_date} 退出码 {r.returncode}（不影响采集数据）")
