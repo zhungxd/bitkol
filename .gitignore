@@ -18,5 +18,8 @@ data/views/
 data/briefings/
 data/kol_avatars.json
 
+# 临时产物（Agent 分析中间文件）
+tmp/
+
 # Trae 工作区文档
 .trae/
